@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pymead"
+name = "astk"
 authors = [
     {name = "Matthew G Lauer", email = "mlauer2015@gmail.com"}
 ]
@@ -34,7 +34,8 @@ dependencies = [
     "scipy",
     "numpy",
     "matplotlib",
-    "pyvista"
+    "pyvista",
+    "pyiges"
 ]
 dynamic = ["version"]
 
