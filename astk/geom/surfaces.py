@@ -321,14 +321,12 @@ class BezierSurface(Surface):
         else:
             raise ValueError("Invalid surface_edge value")
 
-
     def enforce_g0(self, other: "BezierSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
 
         assert self.get_parallel_degree(surface_edge) == other.get_parallel_degree(other_surface_edge)
         for row_index in range(self.get_parallel_degree(surface_edge) + 1):
             self.set_point(other.get_point(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
-
 
     def enforce_c0(self, other: "BezierSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
         self.enforce_g0(other, surface_edge, other_surface_edge)
@@ -345,7 +343,6 @@ class BezierSurface(Surface):
 
             P_i1_b = P_i0_b + f * n_ratio * (P_im_a - P_im1_a)
             self.set_point(P_i1_b, row_index, 1, surface_edge)
-
 
     def enforce_c0c1(self, other: "BezierSurface",
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
@@ -365,9 +362,8 @@ class BezierSurface(Surface):
             P_im1_a = other.get_point(row_index, 1, other_surface_edge)
             P_im2_a = other.get_point(row_index, 2, other_surface_edge)
 
-            P_i2_b = (2 * P_i1_b - P_i0_b) + f**2 * n_ratio * (P_im_a - 2 * P_im1_a + P_im2_a)
+            P_i2_b = (2.0 * P_i1_b - P_i0_b) + f**2 * n_ratio * (P_im_a - 2.0 * P_im1_a + P_im2_a)
             self.set_point(P_i2_b, row_index, 2, surface_edge)
-
 
     def enforce_c0c1c2(self, other: "BezierSurface",
 
@@ -410,7 +406,6 @@ class BezierSurface(Surface):
         plot.add_mesh(grid, **mesh_kwargs)
 
         return grid
-
 
     def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
         _, line_objs = self.generate_control_point_net()
@@ -700,7 +695,7 @@ class RationalBezierSurface(Surface):
 
             f_row = f if isinstance(f, float) else f[row_index]
 
-            w_i2_b = 2 * w_i1_b - w_i0_b + f_row**2 * n_ratio * (w_im_a - 2 * w_im1_a + w_im2_a)
+            w_i2_b = 2.0 * w_i1_b - w_i0_b + f_row**2 * n_ratio * (w_im_a - 2.0 * w_im1_a + w_im2_a)
 
             if w_i2_b < 0:
                 raise NegativeWeightError("G2 enforcement generated a negative weight")
@@ -713,8 +708,8 @@ class RationalBezierSurface(Surface):
             P_im1_a = other.get_point(row_index, 1, other_surface_edge)
             P_im2_a = other.get_point(row_index, 2, other_surface_edge)
 
-            P_i2_b = (2 * w_i1_b / w_i2_b * P_i1_b - w_i0_b / w_i2_b * P_i0_b) + f_row**2 * n_ratio * (1 / w_i2_b) * (
-                    w_im_a * P_im_a - 2 * w_im1_a * P_im1_a + w_im2_a * P_im2_a)
+            P_i2_b = (2.0 * w_i1_b / w_i2_b * P_i1_b - w_i0_b / w_i2_b * P_i0_b) + f_row**2 * n_ratio * (1 / w_i2_b) * (
+                    w_im_a * P_im_a - 2.0 * w_im1_a * P_im1_a + w_im2_a * P_im2_a)
             self.set_point(P_i2_b, row_index, 2, surface_edge)
 
     def enforce_c0c1c2(self, other: "RationalBezierSurface",
