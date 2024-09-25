@@ -32,6 +32,9 @@ class Unit(ABC):
         else:
             return NotImplemented
 
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
     def __truediv__(self, other):
         if isinstance(other, (int, float)):
             new_primary_value = getattr(self, self.primary_unit) / other
