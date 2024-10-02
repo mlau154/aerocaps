@@ -145,25 +145,33 @@ class BezierSurface(Surface):
 
     def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
         if edge == SurfaceEdge.North:
-            return np.array([(self.dSdv(u, 1.0) if perp==True else self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.dSdv(u, 1.0) if perp else
+                              self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.South:
-            return np.array([(self.dSdv(u, 0.0) if perp==True else self.dSdu(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.dSdv(u, 0.0) if perp else
+                              self.dSdu(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.East:
-            return np.array([(self.dSdu(1.0, v) if perp==True else self.dSdv(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.dSdu(1.0, v) if perp else
+                              self.dSdv(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.West:
-            return np.array([(self.dSdu(0.0, v) if perp==True else self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.dSdu(0.0, v) if perp else
+                              self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
         else:
             raise ValueError(f"No edge called {edge}")
 
     def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
         if edge == SurfaceEdge.North:
-            return np.array([(self.d2Sdv2(u, 1.0) if perp==True else self.d2Sdu2(u, 1.0))  for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.d2Sdv2(u, 1.0) if perp else
+                              self.d2Sdu2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.South:
-            return np.array([(self.d2Sdv2(u, 0.0) if perp==True else self.d2Sdu2(u, 0.0))  for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.d2Sdv2(u, 0.0) if perp else
+                              self.d2Sdu2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.East:
-            return np.array([(self.d2Sdu2(1.0, v) if perp==True else self.d2Sdv2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.d2Sdu2(1.0, v) if perp else
+                              self.d2Sdv2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.West:
-            return np.array([(self.d2Sdu2(0.0, v) if perp==True else self.d2Sdv2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.d2Sdu2(0.0, v) if perp else
+                              self.d2Sdv2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
         else:
             raise ValueError(f"No edge called {edge}")
 
