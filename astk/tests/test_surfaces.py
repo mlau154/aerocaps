@@ -6,12 +6,12 @@ print(os.getcwd())
 
 
 #from astk import DATA_DIR
-from astk.geom.line import Line3D
 from astk.geom.point import Point3D
 from astk.geom.surfaces import NURBSSurface, BezierSurface, SurfaceEdge
-from astk.geom.curves import Bezier3D
+from astk.geom.curves import Bezier3D,Line3D
 from astk.units.angle import Angle
 from astk.iges.iges_generator import IGESGenerator
+from astk import TEST_DIR
 
 
 
@@ -32,7 +32,7 @@ def test_nurbs_revolve():
     iges_entities.extend([cp_net_point.to_iges() for cp_net_point in cp_net_points])
     iges_entities.extend([cp_net_line.to_iges() for cp_net_line in cp_net_lines])
 
-    iges_file = os.path.join("C:\astk\astk\astk\tests", "nurbs_test.igs")
+    iges_file = os.path.join(TEST_DIR, "nurbs_test.igs")
     iges_generator = IGESGenerator(iges_entities, "meters")
     iges_generator.generate(iges_file)
 
