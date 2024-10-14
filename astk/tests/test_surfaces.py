@@ -79,3 +79,62 @@ def test_bezier_surface_1():
                 bez_surf_1.verify_g0(bez_surf_2, side_self, side_other)
                 bez_surf_1.verify_g1(bez_surf_2, side_self, side_other)
                 bez_surf_1.verify_g2(bez_surf_2, side_self, side_other)
+
+
+
+def test_bezier_surface_2():
+    """
+    Tests the continuity enforcement method across many random pairs of randomly sized Bezier Surfaces for the parallel degree verification
+    """
+    # GENERATE THE control point arrays by randomly picking making a 3 element array
+    random_array = np.random.randint(low=4, high=8, size=3)
+
+    #Pick the control points randomly from the 3 element array. 
+    n1 = random_array[np.random.randint(0, len(random_array) - 1)]
+    m1 = random_array[np.random.randint(0, len(random_array) - 1)]
+    n2= random_array[np.random.randint(0, len(random_array) - 1)]
+    m2= random_array[np.random.randint(0, len(random_array) - 1)]
+
+
+    num_samples = 50
+    rng = np.random.default_rng(seed=42)
+
+    cp_sets_1 = rng.random((num_samples, n1+1, m1+1, 3))
+    cp_sets_2 = rng.random((num_samples, n2+1, m2+1, 3))
+
+    #Loop through different compatible sides
+
+    if (np.shape(cp_sets_1)[1]==np.shape(cp_sets_2)[1]):
+        i_vals=np.array([0,1])
+        j_vals=np.array([0,1])
+
+    elif (np.shape(cp_sets_1)[1]==np.shape(cp_sets_2)[2]):
+        i_vals=np.array([0,1])
+        j_vals=np.array([2,3])
+
+    elif (np.shape(cp_sets_1)[2]==np.shape(cp_sets_2)[1]):
+        i_vals=np.array([2,3])
+        j_vals=np.array([0,1])
+    
+    elif (np.shape(cp_sets_1)[2]==np.shape(cp_sets_2)[2]):
+        i_vals=np.array([2,3])
+        j_vals=np.array([2,3])
+    
+    for i in i_vals:
+        for j in j_vals:
+            side_self=SurfaceEdge(i)
+            side_other=SurfaceEdge(j)
+
+            # Loop through each pair of control point meshes
+            for cp_set1, cp_set2 in zip(cp_sets_1, cp_sets_2):
+                bez_surf_1 = BezierSurface(cp_set1)
+                bez_surf_2 = BezierSurface(cp_set2)
+
+                # Enforce G0, G1, and G2 continuity
+                bez_surf_1.enforce_g0g1g2(bez_surf_2, 1.0, side_self, side_other)
+
+                # Verify G0, G1, and G2 continuity
+                bez_surf_1.verify_g0(bez_surf_2, side_self, side_other)
+                bez_surf_1.verify_g1(bez_surf_2, side_self, side_other)
+                bez_surf_1.verify_g2(bez_surf_2, side_self, side_other)
+

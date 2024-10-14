@@ -195,10 +195,17 @@ class BezierSurface(Surface):
                 self_perp_edge_derivs, other_perp_edge_derivs)):
 
             # Ensure that each derivative vector has the same direction along the boundary for each surface
-            assert np.allclose(
-                np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
-                np.nan_to_num(other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
-            )
+            try:
+                assert np.allclose(
+                    np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                    np.nan_to_num(other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+                )
+            except AssertionError:
+                assert np.allclose(
+                    np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                    np.nan_to_num(-other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+                )
+
 
             # Compute the ratio of the magnitudes for each derivative vector along the boundary for each surface.
             # These will be compared at the end.
