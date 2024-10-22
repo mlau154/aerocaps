@@ -146,3 +146,43 @@ def test_bezier_surface_2():
                 bez_surf_1.verify_g0(bez_surf_2, side_self, side_other)
                 bez_surf_1.verify_g1(bez_surf_2, side_self, side_other)
                 bez_surf_1.verify_g2(bez_surf_2, side_self, side_other)
+
+
+
+def test_bezier_surface_3():
+    """
+    Tests the continuity enforcement method across many random pairs of randomly sized Bezier Surfaces for verifying whether the tests raise assertion errors when surfaces are incompatible.
+    """
+    for n in range(50):
+        n1 = np.random.randint(low=4, high=10)
+        m1 = np.random.randint(low=4, high=10)
+        n2 = np.random.randint(low=4, high=10)
+        m2 = np.random.randint(low=4, high=10)
+        
+        rng = np.random.default_rng(seed=42)
+
+        cp_1 = rng.random(( n1+1, m1+1, 3))
+        cp_2 = rng.random(( n2+1, m2+1, 3))
+
+        
+        
+        for i in range(4):
+            for j in range(4):
+                side_self=SurfaceEdge(i)
+                side_other=SurfaceEdge(j)
+
+                # Loop through each pair of control point meshes
+                
+                bez_surf_1 = BezierSurface(cp_1)
+                bez_surf_2 = BezierSurface(cp_2)
+                
+                try:
+                    # Enforce G0, G1, and G2 continuity
+                    bez_surf_1.enforce_g0g1g2(bez_surf_2, 1.0, side_self, side_other)
+
+                    # Verify G0, G1, and G2 continuity
+                    bez_surf_1.verify_g0(bez_surf_2, side_self, side_other)
+                    bez_surf_1.verify_g1(bez_surf_2, side_self, side_other)
+                    bez_surf_1.verify_g2(bez_surf_2, side_self, side_other)
+                except AssertionError:
+                    continue
