@@ -129,6 +129,9 @@ def test_bezier_surface_2():
             i_vals=np.array([2,3])
             j_vals=np.array([2,3])
         
+        else:
+            raise ValueError("Could not find matching degrees between the surfaces")
+        
         for i in i_vals:
             for j in j_vals:
                 side_self=SurfaceEdge(i)
