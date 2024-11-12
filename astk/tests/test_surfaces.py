@@ -191,6 +191,9 @@ def test_bezier_surface_3():
                     continue
 
 def Rational_Bezier_Surface_Test_1():
+    """
+    Tests the continuity enforcement method across many random pairs of 4x4 ``BezierSurface``s.
+    """
     for i in range(50):
         n=np.random.randint(4, 9)
         m=n
@@ -198,8 +201,8 @@ def Rational_Bezier_Surface_Test_1():
 
         cp_1 = rng.random(( n+1, m+1, 3))
         cp_2 = rng.random(( n+1, m+1, 3))
-        w_1 = rng.uniform(0, 50)
-        w_2 = rng.uniform(0, 50)
+        w_1 = rng.uniform(0, 50, (n+1, m+1))
+        w_2 = rng.uniform(0, 50, (n+1, m+1))
 
         for i in range(4):
             for j in range(4):
@@ -220,7 +223,7 @@ def Rational_Bezier_Surface_Test_1():
                 Rat_bez_surf_1.verify_g1(Rat_bez_surf_2, side_self, side_other)
                 Rat_bez_surf_1.verify_g2(Rat_bez_surf_2, side_self, side_other)
 
-
+#Rational_Bezier_Surface_Test_1()
 
 
 
