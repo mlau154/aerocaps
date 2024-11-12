@@ -7,7 +7,7 @@ print(os.getcwd())
 
 #from astk import DATA_DIR
 from astk.geom.point import Point3D
-from astk.geom.surfaces import NURBSSurface, BezierSurface, SurfaceEdge
+from astk.geom.surfaces import NURBSSurface, BezierSurface, RationalBezierSurface, SurfaceEdge
 from astk.geom.curves import Bezier3D,Line3D
 from astk.units.angle import Angle
 from astk.iges.iges_generator import IGESGenerator
@@ -189,3 +189,38 @@ def test_bezier_surface_3():
                     bez_surf_1.verify_g2(bez_surf_2, side_self, side_other)
                 except AssertionError:
                     continue
+
+def Rational_Bezier_Surface_Test_1():
+    for i in range(50):
+        n=np.random.randint(4, 9)
+        m=n
+        rng = np.random.default_rng(seed=42)
+
+        cp_1 = rng.random(( n+1, m+1, 3))
+        cp_2 = rng.random(( n+1, m+1, 3))
+        w_1 = rng.uniform(0, 50)
+        w_2 = rng.uniform(0, 50)
+
+        for i in range(4):
+            for j in range(4):
+                side_self=SurfaceEdge(i)
+                side_other=SurfaceEdge(j)
+
+                # Loop through each pair of control point meshes
+                
+                Rat_bez_surf_1 = RationalBezierSurface(cp_1,w_1)
+                Rat_bez_surf_2 = RationalBezierSurface(cp_2,w_2)
+
+                Rat_bez_surf_1.enforce_g0g1g2(Rat_bez_surf_2, 1.0, side_self, side_other)
+
+                # Enforce G0, G1, and G2 continuity
+
+                # Verify G0, G1, and G2 continuity
+                Rat_bez_surf_1.verify_g0(Rat_bez_surf_2, side_self, side_other)
+                Rat_bez_surf_1.verify_g1(Rat_bez_surf_2, side_self, side_other)
+                Rat_bez_surf_1.verify_g2(Rat_bez_surf_2, side_self, side_other)
+
+
+
+
+
