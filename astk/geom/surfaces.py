@@ -145,25 +145,33 @@ class BezierSurface(Surface):
 
     def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
         if edge == SurfaceEdge.North:
-            return np.array([(self.dSdv(u, 1.0) if perp==True else self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.dSdv(u, 1.0) if perp else
+                              self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.South:
-            return np.array([(self.dSdv(u, 0.0) if perp==True else self.dSdu(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.dSdv(u, 0.0) if perp else
+                              self.dSdu(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.East:
-            return np.array([(self.dSdu(1.0, v) if perp==True else self.dSdv(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.dSdu(1.0, v) if perp else
+                              self.dSdv(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.West:
-            return np.array([(self.dSdu(0.0, v) if perp==True else self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.dSdu(0.0, v) if perp else
+                              self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
         else:
             raise ValueError(f"No edge called {edge}")
 
     def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
         if edge == SurfaceEdge.North:
-            return np.array([(self.d2Sdv2(u, 1.0) if perp==True else self.d2Sdu2(u, 1.0))  for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.d2Sdv2(u, 1.0) if perp else
+                              self.d2Sdu2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.South:
-            return np.array([(self.d2Sdv2(u, 0.0) if perp==True else self.d2Sdu2(u, 0.0))  for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.d2Sdv2(u, 0.0) if perp else
+                              self.d2Sdu2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.East:
-            return np.array([(self.d2Sdu2(1.0, v) if perp==True else self.d2Sdv2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.d2Sdu2(1.0, v) if perp else
+                              self.d2Sdv2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.West:
-            return np.array([(self.d2Sdu2(0.0, v) if perp==True else self.d2Sdv2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([(self.d2Sdu2(0.0, v) if perp else
+                              self.d2Sdv2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
         else:
             raise ValueError(f"No edge called {edge}")
 
@@ -265,18 +273,16 @@ class BezierSurface(Surface):
             [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])]
         )
 
-    def extract_edge_curve(self,
-                           u_start: bool = False, u_end: bool = False,
-                           v_start: bool = False, v_end: bool = False):
+    def extract_edge_curve(self, surface_edge: SurfaceEdge):
         P = self.get_control_point_array()
 
-        if u_start:
+        if surface_edge == SurfaceEdge.West:
             return Bezier3D.generate_from_array(P[0, :, :])
-        if u_end:
+        if surface_edge == SurfaceEdge.East:
             return Bezier3D.generate_from_array(P[-1, :, :])
-        if v_start:
+        if surface_edge == SurfaceEdge.South:
             return Bezier3D.generate_from_array(P[:, 0, :])
-        if v_end:
+        if surface_edge == SurfaceEdge.North:
             return Bezier3D.generate_from_array(P[:, -1, :])
 
     def extract_isoparametric_curve_u(self, Nu: int, v: float):
