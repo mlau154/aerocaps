@@ -1218,3 +1218,28 @@ class BSpline3D(Geometry3D):
                 return knot_span_idx
         if t == self.possible_spans[-1][1]:
             return self.possible_span_indices[-1]
+
+
+def main():
+    bspline = BSpline3D(np.array([
+        [1.0, 0.05, 0.0],
+        [0.8, 0.12, 0.0],
+        [0.6, 0.2, 0.0],
+        [0.2, 0.3, 0.0],
+        [0.0, 0.05, 0.0],
+        [0.0, -0.1, 0.0],
+        [0.4, -0.4, 0.0],
+        [0.6, -0.05, 0.0],
+        [1.0, -0.05, 0.0]
+    ]), knot_vector=np.array([0.0, 0.0, 0.0, 0.0, 0.2, 0.375, 0.5, 0.5, 0.75, 1.0, 1.0, 1.0, 1.0]),
+        degree=3
+    )
+    data = bspline.evaluate(np.linspace(0.0, 1.0, 301))
+    plt.plot(data[:, 0], data[:, 1], color="steelblue")
+    plt.plot(bspline.control_points[:, 0], bspline.control_points[:, 1], ls=":", color="grey", marker="o", mec="steelblue", mfc="none")
+    plt.plot([data[75, 0], data[150, 0], data[225, 0]], [data[75, 1], data[150, 1], data[225, 1]], ls="none", marker="o", mfc="indianred", mec="indianred")
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
