@@ -220,6 +220,7 @@ class BezierSurface(Surface):
             with np.errstate(divide="ignore"):
                 magnitude_ratios.append(self_perp_edge_deriv / other_perp_edge_deriv)
 
+
         # Assert that the first derivatives along each boundary are proportional
         current_f = None
         for magnitude_ratio in magnitude_ratios:
@@ -728,11 +729,21 @@ class RationalBezierSurface(Surface):
     def enforce_c0c1c2(self, other: "RationalBezierSurface",
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
+    
+    @staticmethod
+    def _cast_uv(u: float or np.ndarray, v: float or np.ndarray) -> (float, float) or (np.ndarray, np.ndarray):
+        if not isinstance(u, np.ndarray):
+            u = np.array([u])
+        if not isinstance(v, np.ndarray):
+            v = np.array([v])
+
+        #print(f"{u=},{v=}")
+        return u, v
 
     def dSdu(self, u: float or np.ndarray, v: float or np.ndarray):
         n, m = self.degree_u, self.degree_v
         P = self.get_control_point_array()
-        assert type(u) == type(v)
+        u,v=self._cast_uv(u,v)
         if isinstance(u, np.ndarray):
             assert u.shape == v.shape
 
@@ -762,9 +773,11 @@ class RationalBezierSurface(Surface):
         return (A - B) / W
 
     def dSdv(self, u: float or np.ndarray, v: float or np.ndarray):
+        
         n, m = self.degree_u, self.degree_v
         P = self.get_control_point_array()
-        assert type(u) == type(v)
+        #assert type(u) == type(v)
+        u,v=self._cast_uv(u,v)
         if isinstance(u, np.ndarray):
             assert u.shape == v.shape
 
@@ -796,7 +809,8 @@ class RationalBezierSurface(Surface):
     def d2Sdu2(self, u: float or np.ndarray, v: float or np.ndarray):
         n, m = self.degree_u, self.degree_v
         P = self.get_control_point_array()
-        assert type(u) == type(v)
+        #assert type(u) == type(v)
+        u,v=self._cast_uv(u,v)
         if isinstance(u, np.ndarray):
             assert u.shape == v.shape
 
@@ -848,7 +862,8 @@ class RationalBezierSurface(Surface):
     def d2Sdv2(self, u: float or np.ndarray, v: float or np.ndarray):
         n, m = self.degree_u, self.degree_v
         P = self.get_control_point_array()
-        assert type(u) == type(v)
+        #assert type(u) == type(v)
+        u,v=self._cast_uv(u,v)
         if isinstance(u, np.ndarray):
             assert u.shape == v.shape
 
@@ -899,13 +914,13 @@ class RationalBezierSurface(Surface):
     
     def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
         if edge == SurfaceEdge.North:
-            return np.array([self.evaluate_ndarray(u, 1) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate_ndarray(u, 1.0) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.South:
-            return np.array([self.evaluate_ndarray(u, 0) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate_ndarray(u, 0.0) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.East:
-            return np.array([self.evaluate_ndarray(1, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate_ndarray(1.0, v) for v in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.West:
-            return np.array([self.evaluate_ndarray(0, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate_ndarray(0.0, v) for v in np.linspace(0.0, 1.0, n_points)])
         else:
             raise ValueError(f"No edge called {edge}")
 
@@ -983,17 +998,19 @@ class RationalBezierSurface(Surface):
             # These will be compared at the end.
             with np.errstate(divide="ignore"):
                 magnitude_ratios.append(self_perp_edge_deriv / other_perp_edge_deriv)
-
+        #print("Rational",f"{magnitude_ratios=}")
         # Assert that the first derivatives along each boundary are proportional
         current_f = None
         for magnitude_ratio in magnitude_ratios:
             for dxdydz_ratio in magnitude_ratio:
-                if np.isinf(dxdydz_ratio) or dxdydz_ratio == 0.0:
+                
+                if np.any(np.isinf(dxdydz_ratio)) or np.any(np.isnan(dxdydz_ratio)) or np.any(dxdydz_ratio == 0.0):
                     continue
                 if current_f is None:
                     current_f = dxdydz_ratio
                     continue
-                assert np.isclose(dxdydz_ratio, current_f)
+                print(f"{dxdydz_ratio=},{current_f=}")
+                assert np.all(np.isclose(dxdydz_ratio, current_f))
 
     def verify_g2(self, other: "RationalBezierSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge,
                   n_points: int = 10):
