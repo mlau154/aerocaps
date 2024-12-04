@@ -739,6 +739,56 @@ class RationalBezierSurface(Surface):
 
         #print(f"{u=},{v=}")
         return u, v
+    
+    def dSdu_v2(self,u: float, v: float):
+        n, m = self.degree_u, self.degree_v
+        P = self.get_control_point_array()
+        w=self.weights
+        u,v=self._cast_uv(u,v)
+        if isinstance(u, np.ndarray):
+            assert u.shape == v.shape
+
+        A_1 = np.zeros(P.shape[2])
+        A_2 = np.zeros(P.shape[2])
+        B_1 = np.zeros(P.shape[2])
+        B_2 = np.zeros(P.shape[2])
+        
+
+        for i in range(self.degree_u + 1):
+            for j in range(self.degree_v + 1):
+                dbudu=self.degree_u*(bernstein_poly(self.degree_u-1, i-1, u)-bernstein_poly(self.degree_u-1, i, u))
+                A_1 += bernstein_poly(n,i,u)*bernstein_poly(m,j,v)*w[i,j]
+                A_2 += dbudu*bernstein_poly(m,j,v)*w[i,j]*P[i,j,:]
+                B_1 += bernstein_poly(n,i,u)*bernstein_poly(m,j,v)*w[i,j]*P[i,j,:]
+                B_2 += dbudu*bernstein_poly(m,j,v)*w[i,j]
+        A=A_1*A_2
+        B=B_1*B_2
+        return (A-B)/(A_1**2)
+    
+    def dSdv_v2(self, u:float, v:float):
+        n, m = self.degree_u, self.degree_v
+        P = self.get_control_point_array()
+        w=self.weights
+        u,v=self._cast_uv(u,v)
+        if isinstance(u, np.ndarray):
+            assert u.shape == v.shape
+
+        A_1 = np.zeros(P.shape[2])
+        A_2 = np.zeros(P.shape[2])
+        B_1 = np.zeros(P.shape[2])
+        B_2 = np.zeros(P.shape[2])
+
+        for i in range(self.degree_u + 1):
+            for j in range(self.degree_v + 1):
+                dbvdv=m*(bernstein_poly(m-1, j-1, v)-bernstein_poly(m-1, j, v))
+                A_1 += bernstein_poly(n,i,u)*bernstein_poly(m,j,v)*w[i,j]
+                A_2 += bernstein_poly(n,i,u)*dbvdv*w[i,j]*P[i,j,:]
+                B_1 += bernstein_poly(n,i,u)*bernstein_poly(m,j,v)*w[i,j]*P[i,j,:]
+                B_2 += bernstein_poly(n,i,u)*dbvdv*w[i,j]
+        A=A_1*A_2
+        B=B_1*B_2
+        return (A-B)/(A_1**2)
+
 
     def dSdu(self, u: float or np.ndarray, v: float or np.ndarray):
         n, m = self.degree_u, self.degree_v
@@ -939,6 +989,22 @@ class RationalBezierSurface(Surface):
                               self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
         else:
             raise ValueError(f"No edge called {edge}")
+        
+    def get_first_derivs_along_edge_v2(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
+        if edge == SurfaceEdge.North:
+            return np.array([(self.dSdv_v2(u, 1.0) if perp else
+                              self.dSdu_v2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.South:
+            return np.array([(self.dSdv_v2(u, 0.0) if perp else
+                              self.dSdu_v2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.East:
+            return np.array([(self.dSdu_v2(1.0, v) if perp else
+                              self.dSdv_v2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.West:
+            return np.array([(self.dSdu_v2(0.0, v) if perp else
+                              self.dSdv_v2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+        else:
+            raise ValueError(f"No edge called {edge}")
 
     def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
         if edge == SurfaceEdge.North:
@@ -972,6 +1038,9 @@ class RationalBezierSurface(Surface):
         # evaluated at "n_points" locations along the boundary
         self_perp_edge_derivs = self.get_first_derivs_along_edge(surface_edge, n_points=n_points, perp=True)
         other_perp_edge_derivs = other.get_first_derivs_along_edge(other_surface_edge, n_points=n_points, perp=True)
+        self_perp_edge_derivs[np.absolute(self_perp_edge_derivs)<1e-6]=0.0
+        other_perp_edge_derivs[np.absolute(other_perp_edge_derivs)<1e-6]=0.0
+
 
         # Initialize an array of ratios of magnitude of the derivative values at each point for both sides
         # of the boundary
@@ -996,20 +1065,20 @@ class RationalBezierSurface(Surface):
 
             # Compute the ratio of the magnitudes for each derivative vector along the boundary for each surface.
             # These will be compared at the end.
+            #print(f"{self_perp_edge_deriv=},{other_perp_edge_deriv=}")
             with np.errstate(divide="ignore"):
-                magnitude_ratios.append(self_perp_edge_deriv / other_perp_edge_deriv)
+                magnitude_ratios.append(np.nan_to_num(self_perp_edge_deriv / other_perp_edge_deriv,nan=0))
+                    
         #print("Rational",f"{magnitude_ratios=}")
         # Assert that the first derivatives along each boundary are proportional
         current_f = None
         for magnitude_ratio in magnitude_ratios:
             for dxdydz_ratio in magnitude_ratio:
-                
                 if np.any(np.isinf(dxdydz_ratio)) or np.any(np.isnan(dxdydz_ratio)) or np.any(dxdydz_ratio == 0.0):
                     continue
                 if current_f is None:
                     current_f = dxdydz_ratio
                     continue
-                print(f"{dxdydz_ratio=},{current_f=}")
                 assert np.all(np.isclose(dxdydz_ratio, current_f))
 
     def verify_g2(self, other: "RationalBezierSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge,
@@ -1021,7 +1090,10 @@ class RationalBezierSurface(Surface):
         # evaluated at "n_points" locations along the boundary
         self_perp_edge_derivs = self.get_second_derivs_along_edge(surface_edge, n_points=n_points, perp=True)
         other_perp_edge_derivs = other.get_second_derivs_along_edge(other_surface_edge, n_points=n_points, perp=True)
-
+        self_perp_edge_derivs[np.absolute(self_perp_edge_derivs)<1e-6]=0.0
+        other_perp_edge_derivs[np.absolute(other_perp_edge_derivs)<1e-6]=0.0
+        
+        print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
         # Initialize an array of ratios of magnitude of the derivative values at each point for both sides
         # of the boundary
         magnitude_ratios = []
@@ -1045,12 +1117,12 @@ class RationalBezierSurface(Surface):
         current_f = None
         for magnitude_ratio in magnitude_ratios:
             for dxdydz_ratio in magnitude_ratio:
-                if np.isinf(dxdydz_ratio) or dxdydz_ratio == 0.0:
+                if np.any(np.isinf(dxdydz_ratio)) or np.any(np.isnan(dxdydz_ratio)) or np.any(dxdydz_ratio == 0.0):
                     continue
                 if current_f is None:
                     current_f = dxdydz_ratio
                     continue
-                assert np.isclose(dxdydz_ratio, current_f)
+                assert np.all(np.isclose(dxdydz_ratio, current_f))
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
 

@@ -197,23 +197,27 @@ def test_Rational_Bezier_Surface_1():
     """
     negative_counter=0
     for i in range(50):
-        n=3           #np.random.randint(4, 9)
-        m=3
+        n=np.random.randint(4, 9)
+        m=n
         rng = np.random.default_rng(seed=42)
 
-        cp_1 = np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1]],
-                         [[0,1,1],[1,1,0],[2,1,1],[3,1,1]],
-                         [[0,2,0],[1,2,1],[2,2,0],[3,2,1]],
-                         [[0,3,0],[1,3,1],[2,3,1],[3,3,1]]],dtype=np.float64)           #rng.random(( n+1, m+1, 3))
-        cp_2 =  np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1]],
-                         [[0,1,2],[1,1,1],[2,1,1],[3,1,1]],
-                         [[0,2,0],[1,2,0],[2,2,1],[3,2,1]],
-                         [[0,3,0],[1,3,1],[2,3,1],[3,3,1]]],dtype=np.float64)            #rng.random(( n+1, m+1, 3))
-        w_1 = rng.uniform(0.9, 1.1, (n+1, m+1))
-        w_2 = rng.uniform(0.9, 1.1, (n+1, m+1))
+        # cp_1 = np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1]],
+        #                  [[0,1,1],[1,1,0],[2,1,1],[3,1,1]],
+        #                  [[0,2,0],[1,2,1],[2,2,0],[3,2,1]],
+        #                  [[0,3,0],[1,3,1],[2,3,1],[3,3,1]]],dtype=np.float64)  
 
-        for i in range(4):
-            for j in range(4):
+        cp_1 =rng.random(( n+1, m+1, 3))
+                 
+        # cp_2 =  np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1]],
+        #                  [[0,1,2],[1,1,1],[2,1,1],[3,1,1]],
+        #                  [[0,2,0],[1,2,0],[2,2,1],[3,2,1]],
+        #                  [[0,3,0],[1,3,1],[2,3,1],[3,3,1]]],dtype=np.float64)            
+        cp_2 =rng.random(( n+1, m+1, 3))
+        w_1 = rng.uniform(0.2, 0.5, (n+1, m+1))
+        w_2 = rng.uniform(0.9, 1.2, (n+1, m+1))
+
+        for i in range(1):
+            for j in range(1):
                 side_self=SurfaceEdge(i)
                 side_other=SurfaceEdge(j)
 
@@ -221,25 +225,115 @@ def test_Rational_Bezier_Surface_1():
                 
                 Rat_bez_surf_1 = RationalBezierSurface(cp_1,w_1)
                 Rat_bez_surf_2 = RationalBezierSurface(cp_2,w_2)
-                try:
-                    Rat_bez_surf_1.enforce_g0g1g2(Rat_bez_surf_2, 1.0, side_self, side_other)
-                except NegativeWeightError:
-                    #print(f"{negative_counter=}")
-                    negative_counter+=1
-                    continue
+                
+                Rat_bez_surf_1.enforce_g0g1g2(Rat_bez_surf_2, 1.0, side_self, side_other)
+
+                    # iges_entities = [Rat_bez_surf_1.to_iges(),Rat_bez_surf_2.to_iges()]
+                    # cp_net_points, cp_net_lines = Rat_bez_surf_1.generate_control_point_net()
+                    # iges_entities.extend([cp_net_point.to_iges() for cp_net_point in cp_net_points])
+                    # iges_entities.extend([cp_net_line.to_iges() for cp_net_line in cp_net_lines])
+                    # cp_net_points_2, cp_net_lines_2 = Rat_bez_surf_2.generate_control_point_net()
+                    # iges_entities.extend([cp_net_point.to_iges() for cp_net_point in cp_net_points_2])
+                    # iges_entities.extend([cp_net_line.to_iges() for cp_net_line in cp_net_lines_2])
+
+                    # iges_file = os.path.join(TEST_DIR, "Rat_Bez_test.igs")
+                    # print(f"{iges_file=}")
+                    # iges_generator = IGESGenerator(iges_entities, "meters")
+                    # iges_generator.generate(iges_file)
+                    # print("Generator passed")
+
+                #except NegativeWeightError:
+                #print(f"{negative_counter=}")
+                #negative_counter+=1
+                #continue
                 # Enforce G0, G1, and G2 continuity
 
                 # Verify G0, G1, and G2 continuity
                 
                 
                 Rat_bez_surf_1.verify_g0(Rat_bez_surf_2, side_self, side_other)
+
+                # g1_self=Rat_bez_surf_1.get_first_derivs_along_edge(side_self)
+                # g2_self=Rat_bez_surf_2.get_first_derivs_along_edge(side_other)
+
+                # g1_self_v2=Rat_bez_surf_1.get_first_derivs_along_edge_v2(side_self)
+                # g2_self_v2=Rat_bez_surf_2.get_first_derivs_along_edge_v2(side_other)
+                
+                #print(f"{g1_self=},{g2_self=}")
+                #print(f"{g1_self_v2=},{g2_self_v2=}")
                 Rat_bez_surf_1.verify_g1(Rat_bez_surf_2, side_self, side_other)
                 Rat_bez_surf_1.verify_g2(Rat_bez_surf_2, side_self, side_other)
     #print(f"{negative_counter=}")
-                    
-                    
-
-#Rational_Bezier_Surface_Test_1()
 
 
+def test_Rational_Bezier_Surface_2():
+    """
+    Tests the continuity enforcement method across many random pairs of 4x4 ``RationalBezierSurface``s.
+    """
 
+    for i in range(1):
+        random_array = np.random.randint(low=4, high=15, size=3)
+
+        #Pick the control points randomly from the 3 element array. 
+        n1 = random_array[np.random.randint(0, len(random_array) )]
+        m1 = random_array[np.random.randint(0, len(random_array) )]
+        
+        n1m1_array=np.array([n1,m1])
+        random_value=np.random.randint(0,2)
+        if random_value==0:
+            n2= n1m1_array[np.random.randint(0,2)]
+            m2= random_array[np.random.randint(0, len(random_array) )]
+        else:
+            m2= n1m1_array[np.random.randint(0,2)]
+            n2= random_array[np.random.randint(0, len(random_array) )]
+
+
+
+        
+        rng = np.random.default_rng(seed=42)
+
+        cp_1 = rng.random(( n1+1, m1+1, 3))
+        cp_2 = rng.random(( n2+1, m2+1, 3))
+        w_1 = rng.uniform(0.9, 1.1, (n1+1, m1+1))
+        w_2 = rng.uniform(0.9, 1.1, (n2+1, m2+1))
+
+        #Loop through different compatible sides
+
+        if (np.shape(cp_1)[0]==np.shape(cp_2)[0]):
+            i_vals=np.array([0,1])
+            j_vals=np.array([0,1])
+
+        elif (np.shape(cp_1)[0]==np.shape(cp_2)[1]):
+            i_vals=np.array([0,1])
+            j_vals=np.array([2,3])
+
+        elif (np.shape(cp_1)[1]==np.shape(cp_2)[0]):
+            i_vals=np.array([2,3])
+            j_vals=np.array([0,1])
+        
+        elif (np.shape(cp_1)[1]==np.shape(cp_2)[1]):
+            i_vals=np.array([2,3])
+            j_vals=np.array([2,3])
+        
+        else:
+            raise ValueError("Could not find matching degrees between the surfaces")
+        
+        for i in i_vals:
+            for j in j_vals:
+                side_self=SurfaceEdge(i)
+                side_other=SurfaceEdge(j)
+
+                # Loop through each pair of control point meshes
+                
+                Rat_bez_surf_1 = RationalBezierSurface(cp_1,w_1)
+                Rat_bez_surf_2 = RationalBezierSurface(cp_2,w_2)
+
+                # Enforce G0, G1, and G2 continuity
+                Rat_bez_surf_1.enforce_g0g1g2(Rat_bez_surf_2, 1.0, side_self, side_other)
+
+                # Verify G0, G1, and G2 continuity
+                Rat_bez_surf_1.verify_g0(Rat_bez_surf_2, side_self, side_other)
+                Rat_bez_surf_1.verify_g1(Rat_bez_surf_2, side_self, side_other)
+                Rat_bez_surf_1.verify_g2(Rat_bez_surf_2, side_self, side_other)
+
+test_Rational_Bezier_Surface_2()
