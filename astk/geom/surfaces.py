@@ -3,6 +3,7 @@ from enum import Enum
 
 import numpy as np
 import pyvista as pv
+from scipy.optimize import fsolve
 
 import astk.iges.entity
 import astk.iges.surfaces
@@ -985,6 +986,41 @@ class RationalBezierSurface(Surface):
         dW = 2 * m * np.tile(weight_sum, (3, 1)).T * np.tile(weight_deriv_sum, (3, 1)).T
 
         return (W * (dA - dB) - dW * (A - B)) / W**2
+
+    def get_u_or_v_given_uvxyz(self, u: float = None, v: float = None, uv_guess: float = 0.5,
+                               x: float = None, y: float = None, z: float = None):
+        """
+        Computes one parametric value given the other and a specified :math:`x`-, :math:`y`-, or :math:`z`-location.
+        """
+        # Validate inputs
+        if u is None and v is None or (u is not None and v is not None):
+            raise ValueError("Must specify exactly one of either u or v")
+        xyz_spec = (x is not None, y is not None, z is not None)
+        if len([xyz for xyz in xyz_spec if xyz]) != 1:
+            raise ValueError("Must specify exactly one of x, y, or z")
+
+        if x is not None:
+            xyz, xyz_val = "x", x
+        elif y is not None:
+            xyz, xyz_val = "y", y
+        elif z is not None:
+            xyz, xyz_val = "z", z
+        else:
+            raise ValueError("Did not detect an x, y, or z input")
+
+        def root_find_func_u(u_current):
+            point = self.evaluate_simple(u_current, v)
+            return np.array([getattr(point, xyz).m - xyz_val])
+
+        def root_find_func_v(v_current):
+            point = self.evaluate_simple(u, v_current)
+            return np.array([getattr(point, xyz).m - xyz_val])
+
+        if v is not None:
+            return fsolve(root_find_func_u, x0=np.array([uv_guess]))[0]
+        if u is not None:
+            return fsolve(root_find_func_v, x0=np.array([uv_guess]))[0]
+        raise ValueError("Did not detect a u or v input")
 
     def split_at_u(self, u0: float) -> ("RationalBezierSurface", "RationalBezierSurface"):
         """
