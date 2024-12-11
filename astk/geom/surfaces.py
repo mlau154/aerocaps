@@ -376,6 +376,98 @@ class BezierSurface(Surface):
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
 
+    def split_at_u(self, u0: float) -> ("BezierSurface", "BezierSurface"):
+        """
+        Splits the Bezier surface at :math:`u=u_0` along the :math:`v`-parametric direction.
+        """
+        P = self.get_control_point_array()
+
+        def de_casteljau(i: int, j: int, k: int) -> np.ndarray:
+            """
+            Based on https://en.wikipedia.org/wiki/De_Casteljau%27s_algorithm. Recursive algorithm where the
+            base case is just the value of the ith original control point.
+
+            Parameters
+            ----------
+            i: int
+                Lower index
+            j: int
+                Upper index
+            k: int
+                Control point row index
+
+            Returns
+            -------
+            np.ndarray
+                A one-dimensional array containing the :math:`x` and :math:`y` values of a control point evaluated
+                at :math:`(i,j)` for a Bézier curve split at the parameter value ``t_split``
+            """
+            if j == 0:
+                return P[i, k, :]
+            return de_casteljau(i, j - 1, k) * (1 - u0) + de_casteljau(i + 1, j - 1, k) * u0
+
+        bez_surf_split_1_P = np.array([
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+        ])
+        bez_surf_split_2_P = np.array([
+            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+        ])
+
+        return (
+            BezierSurface.generate_from_array(
+                np.transpose(
+                    bez_surf_split_1_P, (1, 0, 2)
+                )
+            ),
+            BezierSurface.generate_from_array(
+                np.transpose(
+                    bez_surf_split_2_P, (1, 0, 2)
+                )
+            )
+        )
+
+    def split_at_v(self, v0: float) -> ("BezierSurface", "BezierSurface"):
+        """
+        Splits the Bezier surface at :math:`v=v_0` along the :math:`u`-parametric direction.
+        """
+        P = self.get_control_point_array()
+
+        def de_casteljau(i: int, j: int, k: int) -> np.ndarray:
+            """
+            Based on https://en.wikipedia.org/wiki/De_Casteljau%27s_algorithm. Recursive algorithm where the
+            base case is just the value of the ith original control point.
+
+            Parameters
+            ----------
+            i: int
+                Lower index
+            j: int
+                Upper index
+            k: int
+                Control point row index
+
+            Returns
+            -------
+            np.ndarray
+                A one-dimensional array containing the :math:`x` and :math:`y` values of a control point evaluated
+                at :math:`(i,j)` for a Bézier curve split at the parameter value ``t_split``
+            """
+            if j == 0:
+                return P[k, i, :]
+            return de_casteljau(i, j - 1, k) * (1 - v0) + de_casteljau(i + 1, j - 1, k) * v0
+
+        bez_surf_split_1_P = np.array([
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+        ])
+        bez_surf_split_2_P = np.array([
+            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+        ])
+
+        return (
+            BezierSurface.generate_from_array(bez_surf_split_1_P),
+            BezierSurface.generate_from_array(bez_surf_split_2_P)
+        )
+
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
 
         points = []
@@ -472,6 +564,10 @@ class RationalBezierSurface(Surface):
 
     def get_control_point_array(self) -> np.ndarray:
         return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
+
+    def get_xyzw_array(self) -> np.ndarray:
+        return np.array([np.array([(p.as_array() * w).tolist() + [w] for p, w in zip(p_arr, w_arr)])
+                         for p_arr, w_arr in zip(self.points, self.weights)])
 
     @classmethod
     def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
@@ -889,6 +985,105 @@ class RationalBezierSurface(Surface):
         dW = 2 * m * np.tile(weight_sum, (3, 1)).T * np.tile(weight_deriv_sum, (3, 1)).T
 
         return (W * (dA - dB) - dW * (A - B)) / W**2
+
+    def split_at_u(self, u0: float) -> ("RationalBezierSurface", "RationalBezierSurface"):
+        """
+        Splits the rational Bezier surface at :math:`u=u_0` along the :math:`v`-parametric direction.
+        """
+        Pw = self.get_xyzw_array()
+
+        def de_casteljau(i: int, j: int, k: int) -> np.ndarray:
+            """
+            Based on https://en.wikipedia.org/wiki/De_Casteljau%27s_algorithm. Recursive algorithm where the
+            base case is just the value of the ith original control point.
+
+            Parameters
+            ----------
+            i: int
+                Lower index
+            j: int
+                Upper index
+            k: int
+                Control point row index
+
+            Returns
+            -------
+            np.ndarray
+                A one-dimensional array containing the :math:`x` and :math:`y` values of a control point evaluated
+                at :math:`(i,j)` for a Bézier curve split at the parameter value ``t_split``
+            """
+            if j == 0:
+                return Pw[i, k, :]
+            return de_casteljau(i, j - 1, k) * (1 - u0) + de_casteljau(i + 1, j - 1, k) * u0
+
+        bez_surf_split_1_Pw = np.array([
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+        ])
+        bez_surf_split_2_Pw = np.array([
+            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+        ])
+
+        transposed_Pw_1 = np.transpose(bez_surf_split_1_Pw, (1, 0, 2))
+        transposed_Pw_2 = np.transpose(bez_surf_split_2_Pw, (1, 0, 2))
+
+        return (
+            RationalBezierSurface.generate_from_array(
+                transposed_Pw_1[:, :, :3] / np.repeat(transposed_Pw_1[:, :, -1][:, :, np.newaxis], 3, axis=2),
+                transposed_Pw_1[:, :, -1]
+            ),
+            RationalBezierSurface.generate_from_array(
+                transposed_Pw_2[:, :, :3] / np.repeat(transposed_Pw_2[:, :, -1][:, :, np.newaxis], 3, axis=2),
+                transposed_Pw_2[:, :, -1]
+            )
+        )
+
+    def split_at_v(self, v0: float) -> ("BezierSurface", "BezierSurface"):
+        """
+        Splits the rational Bezier surface at :math:`v=v_0` along the :math:`u`-parametric direction.
+        """
+        Pw = self.get_xyzw_array()
+
+        def de_casteljau(i: int, j: int, k: int) -> np.ndarray:
+            """
+            Based on https://en.wikipedia.org/wiki/De_Casteljau%27s_algorithm. Recursive algorithm where the
+            base case is just the value of the ith original control point.
+
+            Parameters
+            ----------
+            i: int
+                Lower index
+            j: int
+                Upper index
+            k: int
+                Control point row index
+
+            Returns
+            -------
+            np.ndarray
+                A one-dimensional array containing the :math:`x` and :math:`y` values of a control point evaluated
+                at :math:`(i,j)` for a Bézier curve split at the parameter value ``t_split``
+            """
+            if j == 0:
+                return Pw[k, i, :]
+            return de_casteljau(i, j - 1, k) * (1 - v0) + de_casteljau(i + 1, j - 1, k) * v0
+
+        bez_surf_split_1_Pw = np.array([
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+        ])
+        bez_surf_split_2_Pw = np.array([
+            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+        ])
+
+        return (
+            RationalBezierSurface.generate_from_array(
+                bez_surf_split_1_Pw[:, :, :3] / np.repeat(bez_surf_split_1_Pw[:, :, np.newaxis], 3, axis=2),
+                bez_surf_split_1_Pw[:, :, -1]
+            ),
+            RationalBezierSurface.generate_from_array(
+                bez_surf_split_2_Pw[:, :, :3] / np.repeat(bez_surf_split_2_Pw[:, :, np.newaxis], 3, axis=2),
+                bez_surf_split_2_Pw[:, :, -1]
+            )
+        )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
 
