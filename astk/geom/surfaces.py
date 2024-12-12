@@ -1066,6 +1066,7 @@ class RationalBezierSurface(Surface):
             # Compute the ratio of the magnitudes for each derivative vector along the boundary for each surface.
             # These will be compared at the end.
             #print(f"{self_perp_edge_deriv=},{other_perp_edge_deriv=}")
+            np.seterr(divide='ignore', invalid='ignore')
             with np.errstate(divide="ignore"):
                 magnitude_ratios.append(np.nan_to_num(self_perp_edge_deriv / other_perp_edge_deriv,nan=0))
                     
@@ -1093,7 +1094,9 @@ class RationalBezierSurface(Surface):
         self_perp_edge_derivs[np.absolute(self_perp_edge_derivs)<1e-6]=0.0
         other_perp_edge_derivs[np.absolute(other_perp_edge_derivs)<1e-6]=0.0
         
-        print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
+        ratios_other_self=other_perp_edge_derivs/self_perp_edge_derivs
+        print(f"{ratios_other_self=}")
+        #print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
         # Initialize an array of ratios of magnitude of the derivative values at each point for both sides
         # of the boundary
         magnitude_ratios = []
