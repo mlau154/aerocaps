@@ -28,6 +28,9 @@ class Vector2D:
     def get_normalized_vector(self) -> "Vector2D":
         return Vector2D.from_array(np.array(self.normalized_value()))
 
+    def scale(self, factor: float) -> "Vector2D":
+        return Vector2D(self.p0, factor * (self.p1 - self.p0))
+
     def as_array(self):
         return np.array([xyz.m for xyz in self.value()])
 
@@ -58,6 +61,9 @@ class Vector3D:
 
     def get_normalized_vector(self) -> "Vector3D":
         return Vector3D.from_array(np.array(self.normalized_value()))
+
+    def scale(self, factor: float) -> "Vector3D":
+        return Vector3D(self.p0, factor * (self.p1 - self.p0))
 
     def as_array(self):
         return np.array([xyz.m for xyz in self.value()])
