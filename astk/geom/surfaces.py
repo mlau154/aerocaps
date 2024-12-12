@@ -9,7 +9,7 @@ import astk.iges.entity
 import astk.iges.surfaces
 from astk.geom import Surface, InvalidGeometryError, NegativeWeightError
 from astk.geom.point import Point3D
-from astk.geom.curves import Bezier3D, Line3D
+from astk.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D
 from astk.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis
 from astk.geom.vector import Vector3D
 from astk.units.angle import Angle
@@ -274,7 +274,7 @@ class BezierSurface(Surface):
             [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])]
         )
 
-    def extract_edge_curve(self, surface_edge: SurfaceEdge):
+    def extract_edge_curve(self, surface_edge: SurfaceEdge) -> Bezier3D:
         P = self.get_control_point_array()
 
         if surface_edge == SurfaceEdge.West:
@@ -285,6 +285,8 @@ class BezierSurface(Surface):
             return Bezier3D.generate_from_array(P[:, 0, :])
         if surface_edge == SurfaceEdge.North:
             return Bezier3D.generate_from_array(P[:, -1, :])
+
+        raise ValueError(f"Invalid surface edge {surface_edge}")
 
     def extract_isoparametric_curve_u(self, Nu: int, v: float):
         u_vec = np.linspace(0.0, 1.0, Nu)
@@ -659,6 +661,21 @@ class RationalBezierSurface(Surface):
         return np.array(
             [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])]
         )
+
+    def extract_edge_curve(self, surface_edge: SurfaceEdge) -> RationalBezierCurve3D:
+        P = self.get_control_point_array()
+        w = self.weights
+
+        if surface_edge == SurfaceEdge.West:
+            return RationalBezierCurve3D.generate_from_array(P[0, :, :], w[0, :])
+        if surface_edge == SurfaceEdge.East:
+            return RationalBezierCurve3D.generate_from_array(P[-1, :, :], w[-1, :])
+        if surface_edge == SurfaceEdge.South:
+            return RationalBezierCurve3D.generate_from_array(P[:, 0, :], w[:, 0])
+        if surface_edge == SurfaceEdge.North:
+            return RationalBezierCurve3D.generate_from_array(P[:, -1, :], w[:, -1])
+
+        raise ValueError(f"Invalid surface edge {surface_edge}")
 
     def get_parallel_degree(self, surface_edge: SurfaceEdge):
         if surface_edge in [SurfaceEdge.North, SurfaceEdge.South]:
