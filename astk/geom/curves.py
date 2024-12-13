@@ -312,8 +312,8 @@ class CircularArc2D(PCurve2D):
 
 class Bezier2D(PCurve2D):
 
-    def __init__(self, points: typing.List[Point2D]):
-        self.points = points
+    def __init__(self, control_points: typing.List[Point2D]):
+        self.control_points = control_points
         self.degree = None
         self.curve_connections = []
 
@@ -397,14 +397,14 @@ class Bezier2D(PCurve2D):
                                 for i in range(degree + 1 - order)]), axis=0).T
 
     def get_control_point_array(self, unit: str = "m") -> np.ndarray:
-        return np.array([p.as_array(unit=unit) for p in self.points])
+        return np.array([p.as_array(unit=unit) for p in self.control_points])
 
     @classmethod
     def generate_from_array(cls, P: np.ndarray, unit: str = "m"):
         return cls([Point2D(x=Length(**{unit: xy[0]}), y=Length(**{unit: xy[1]})) for xy in P])
 
     def evaluate_point2d(self, t: float) -> Point2D:
-        n_ctrl_points = len(self.points)
+        n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
         P = self.get_control_point_array()
 
@@ -450,7 +450,7 @@ class Bezier2D(PCurve2D):
         t = np.linspace(0.0, 1.0, 100) if t is None else t
 
         # Number of control points, curve degree, control point array
-        n_ctrl_points = len(self.points)
+        n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
         P = self.get_control_point_array()
 
@@ -517,9 +517,9 @@ class Bezier2D(PCurve2D):
     def split(self, t_split: float):
 
         # Number of control points, curve degree, control point array
-        n_ctrl_points = len(self.points)
+        n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
-        P = np.array([p.as_array() for p in self.points])
+        P = np.array([p.as_array() for p in self.control_points])
 
         def de_casteljau(i: int, j: int) -> np.ndarray:
             """
@@ -546,9 +546,9 @@ class Bezier2D(PCurve2D):
         bez_split_1_P = np.array([de_casteljau(i=0, j=i) for i in range(n_ctrl_points)])
         bez_split_2_P = np.array([de_casteljau(i=i, j=degree - i) for i in range(n_ctrl_points)])
 
-        bez_1_points = [self.points[0]] + [Point2D(Length(m=xy[0]), Length(m=xy[1])) for xy in bez_split_1_P[1:, :]]
+        bez_1_points = [self.control_points[0]] + [Point2D(Length(m=xy[0]), Length(m=xy[1])) for xy in bez_split_1_P[1:, :]]
         bez_2_points = [bez_1_points[-1]] + [Point2D(Length(m=xy[0]), Length(m=xy[1])) for xy in bez_split_2_P[1:-1, :]] + [
-            self.points[-1]]
+            self.control_points[-1]]
 
         return (
             Bezier2D(bez_1_points),
@@ -558,8 +558,8 @@ class Bezier2D(PCurve2D):
 
 class Bezier3D(PCurve3D):
 
-    def __init__(self, points: typing.List[Point3D]):
-        self.points = points
+    def __init__(self, control_points: typing.List[Point3D]):
+        self.control_points = control_points
         self.degree = None
         self.curve_connections = []
 
@@ -569,7 +569,7 @@ class Bezier3D(PCurve3D):
         )
 
     def projection_on_principal_plane(self, plane: str = "XY") -> Bezier2D:
-        return Bezier2D(points=[pt.projection_on_principal_plane(plane) for pt in self.points])
+        return Bezier2D(control_points=[pt.projection_on_principal_plane(plane) for pt in self.control_points])
 
     @staticmethod
     def bernstein_poly(n: int, i: int, t: int or float or np.ndarray):
@@ -651,7 +651,7 @@ class Bezier3D(PCurve3D):
                                 for i in range(degree + 1 - order)]), axis=0).T
 
     def get_control_point_array(self, unit: str = "m") -> np.ndarray:
-        return np.array([p.as_array(unit=unit) for p in self.points])
+        return np.array([p.as_array(unit=unit) for p in self.control_points])
 
     @classmethod
     def generate_from_array(cls, P: np.ndarray, unit: str = "m"):
@@ -660,7 +660,7 @@ class Bezier3D(PCurve3D):
                             z=Length(**{unit: xyz[2]})) for xyz in P])
 
     def evaluate_point3d(self, t: float) -> Point3D:
-        n_ctrl_points = len(self.points)
+        n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
         P = self.get_control_point_array()
 
@@ -707,7 +707,7 @@ class Bezier3D(PCurve3D):
         t = np.linspace(0.0, 1.0, 100) if t is None else t
 
         # Number of control points, curve degree, control point array
-        n_ctrl_points = len(self.points)
+        n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
         P = self.get_control_point_array()
 
@@ -778,9 +778,9 @@ class Bezier3D(PCurve3D):
     def split(self, t_split: float):
 
         # Number of control points, curve degree, control point array
-        n_ctrl_points = len(self.points)
+        n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
-        P = np.array([p.as_array() for p in self.points])
+        P = np.array([p.as_array() for p in self.control_points])
 
         def de_casteljau(i: int, j: int) -> np.ndarray:
             """
@@ -807,10 +807,10 @@ class Bezier3D(PCurve3D):
         bez_split_1_P = np.array([de_casteljau(i=0, j=i) for i in range(n_ctrl_points)])
         bez_split_2_P = np.array([de_casteljau(i=i, j=degree - i) for i in range(n_ctrl_points)])
 
-        bez_1_points = [self.points[0]] + [Point3D(
+        bez_1_points = [self.control_points[0]] + [Point3D(
             Length(m=xyz[0]), Length(m=xyz[1]), Length(m=xyz[2])) for xyz in bez_split_1_P[1:, :]]
         bez_2_points = [bez_1_points[-1]] + [Point3D(
-            Length(m=xyz[0]), Length(m=xyz[1]), Length(m=xyz[2])) for xyz in bez_split_2_P[1:-1, :]] + [self.points[-1]]
+            Length(m=xyz[0]), Length(m=xyz[1]), Length(m=xyz[2])) for xyz in bez_split_2_P[1:-1, :]] + [self.control_points[-1]]
 
         return (
             Bezier3D(bez_1_points),
@@ -942,14 +942,14 @@ class RationalBezierCurve3D(Geometry3D):
     }
 
     def __init__(self,
-                 points: typing.List[Point3D],
+                 control_points: typing.List[Point3D],
                  weights: np.ndarray):
         """
         Non-uniform rational B-spline (NURBS) curve evaluation class
         """
-        self.points = points
+        self.control_points = control_points
         assert weights.ndim == 1
-        assert len(points) == len(weights)
+        assert len(control_points) == len(weights)
 
         # Negative weight check
         for weight in weights:
@@ -958,11 +958,11 @@ class RationalBezierCurve3D(Geometry3D):
 
         self.dim = 3
         self.weights = np.array(weights)
-        self.knot_vector = np.zeros(2 * len(points))
-        self.knot_vector[len(points):] = 1.0
-        self.degree = len(points) - 1
+        self.knot_vector = np.zeros(2 * len(control_points))
+        self.knot_vector[len(control_points):] = 1.0
+        self.degree = len(control_points) - 1
         assert self.knot_vector.ndim == 1
-        assert len(self.knot_vector) == len(points) + self.degree + 1
+        assert len(self.knot_vector) == len(control_points) + self.degree + 1
 
     def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
         return astk.iges.curves.RationalBSplineCurveIGES(
@@ -979,7 +979,7 @@ class RationalBezierCurve3D(Geometry3D):
         return self.evaluate_simple(t).as_array()
 
     def get_control_point_array(self) -> np.ndarray:
-        return np.array([p.as_array() for p in self.points])
+        return np.array([p.as_array() for p in self.control_points])
 
     @classmethod
     def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
@@ -1012,7 +1012,7 @@ class RationalBezierCurve3D(Geometry3D):
         return nchoosek(n, i) * t ** i * (1.0 - t) ** (n - i)
 
     def evaluate_simple(self, t: float) -> Point3D:
-        n_ctrl_points = len(self.points)
+        n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
         P = self.get_control_point_array()
 
@@ -1057,8 +1057,8 @@ class RationalBezierCurve3D(Geometry3D):
             The curvature at :math:`t=0`
         """
         R1 = (self.weights[0] * self.weights[2]) / self.weights[1]**2
-        P01 = Vector3D(p0=self.points[0], p1=self.points[1])
-        P12 = Vector3D(p0=self.points[1], p1=self.points[2])
+        P01 = Vector3D(p0=self.control_points[0], p1=self.control_points[1])
+        P12 = Vector3D(p0=self.control_points[1], p1=self.control_points[2])
         return (self.degree - 1) / self.degree * R1 * P01.cross(P12).mag().m / P01.mag().m**3
 
     def compute_curvature_at_t1(self) -> float:
@@ -1073,12 +1073,12 @@ class RationalBezierCurve3D(Geometry3D):
             The curvature at :math:`t=1`
         """
         R1 = (self.weights[-1] * self.weights[-3]) / self.weights[-2] ** 2
-        P_nm2_nm1 = Vector3D(p0=self.points[-3], p1=self.points[-2])
-        P_nm1_n = Vector3D(p0=self.points[-2], p1=self.points[-1])
+        P_nm2_nm1 = Vector3D(p0=self.control_points[-3], p1=self.control_points[-2])
+        P_nm1_n = Vector3D(p0=self.control_points[-2], p1=self.control_points[-1])
         return (self.degree - 1) / self.degree * R1 * P_nm2_nm1.cross(P_nm1_n).mag().m / P_nm1_n.mag().m ** 3
 
     def enforce_g0(self, other: "RationalBezierCurve3D"):
-        other.points[0] = self.points[-1]
+        other.control_points[0] = self.control_points[-1]
 
     def enforce_c0(self, other: "RationalBezierCurve3D"):
         self.enforce_g0(other)
@@ -1088,7 +1088,7 @@ class RationalBezierCurve3D(Geometry3D):
         n_ratio = self.degree / other.degree
         w_ratio_a = self.weights[-2] / self.weights[-1]
         w_ratio_b = other.weights[0] / other.weights[1]
-        other.points[1] = other.points[0] + f * n_ratio * w_ratio_a * w_ratio_b * (self.points[-1] - self.points[-2])
+        other.control_points[1] = other.control_points[0] + f * n_ratio * w_ratio_a * w_ratio_b * (self.control_points[-1] - self.control_points[-2])
 
     def enforce_c0c1(self, other: "RationalBezierCurve3D"):
         self.enforce_g0g1(other, f=1.0)
@@ -1102,12 +1102,12 @@ class RationalBezierCurve3D(Geometry3D):
         w_ratio_2 = other.weights[0] / other.weights[2]
         w_ratio_3 = self.weights[-2] / self.weights[-1]
         w_ratio_4 = other.weights[1] / other.weights[0]
-        other.points[2] = other.points[1] + f**2 * n_ratio_1 * n_ratio_2 * w_ratio_1 * w_ratio_2 * (
-                self.points[-3] - self.points[-2]) - f**2 * n_ratio_1 * n_ratio_3 * w_ratio_2 * (
+        other.control_points[2] = other.control_points[1] + f ** 2 * n_ratio_1 * n_ratio_2 * w_ratio_1 * w_ratio_2 * (
+                self.control_points[-3] - self.control_points[-2]) - f ** 2 * n_ratio_1 * n_ratio_3 * w_ratio_2 * (
                 2 * self.degree * w_ratio_3**2 - (self.degree - 1) * w_ratio_1 - 2 * w_ratio_3) * (
-                self.points[-2] - self.points[-1]) + n_ratio_3 * w_ratio_2 * (
+                                          self.control_points[-2] - self.control_points[-1]) + n_ratio_3 * w_ratio_2 * (
                 2 * other.degree * w_ratio_4**2 - (other.degree - 1) * w_ratio_2**-1 - 2 * w_ratio_4) * (
-                other.points[1] - other.points[0])
+                                          other.control_points[1] - other.control_points[0])
 
     def enforce_c0c1c2(self, other: "RationalBezierCurve3D"):
         self.enforce_g0g1g2(other, f=1.0)

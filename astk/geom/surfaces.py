@@ -1,15 +1,18 @@
 import typing
+from copy import deepcopy
 from enum import Enum
 
 import numpy as np
 import pyvista as pv
 from scipy.optimize import fsolve
+import shapely
 
 import astk.iges.entity
 import astk.iges.surfaces
 from astk.geom import Surface, InvalidGeometryError, NegativeWeightError
 from astk.geom.point import Point3D
-from astk.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D
+from astk.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
+import astk
 from astk.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis
 from astk.geom.vector import Vector3D
 from astk.units.angle import Angle
@@ -22,7 +25,8 @@ __all__ = [
     "SurfaceCorner",
     "BezierSurface",
     "RationalBezierSurface",
-    "NURBSSurface"
+    "NURBSSurface",
+    "FillSurfaceCreator"
 ]
 
 
@@ -605,7 +609,7 @@ class RationalBezierSurface(Surface):
         weights = []
         angles = _determine_angle_distribution()
 
-        for point in bezier.points:
+        for point in bezier.control_points:
 
             axis_projection = project_point_onto_line(point, axis)
             radius = measure_distance_point_line(point, axis)
@@ -1250,7 +1254,7 @@ class NURBSSurface(Surface):
         weights = []
         angles = _determine_angle_distribution()
 
-        for point in bezier.points:
+        for point in bezier.control_points:
 
             axis_projection = project_point_onto_line(point, axis)
             radius = measure_distance_point_line(point, axis)
@@ -1288,9 +1292,9 @@ class NURBSSurface(Surface):
                 new_knot = knots_v[2 + idx] if idx % 2 else knots_v[2 + idx] + delta
                 knots_v = np.insert(knots_v, 3 + idx, new_knot)
 
-        knots_u = np.array([0.0 for _ in bezier.points] + [1.0 for _ in bezier.points])
+        knots_u = np.array([0.0 for _ in bezier.control_points] + [1.0 for _ in bezier.control_points])
         degree_v = 2
-        degree_u = len(bezier.points) - 1
+        degree_u = len(bezier.control_points) - 1
 
         return cls(control_points, knots_u, knots_v, weights, degree_u, degree_v)
 
@@ -1419,3 +1423,120 @@ class NURBSSurface(Surface):
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
         plot.add_points(point_arr, **point_kwargs)
+
+
+class FillSurfaceCreator:
+    def __init__(self, closed_curve_loop_list: typing.List[Bezier3D or RationalBezierCurve3D or NURBSCurve3D or BSpline3D]):
+        """
+        Generator class for fill surfaces comprised of point-curve polar-like patches.
+
+        .. warning::
+            The curves must be co-planar to achieve the expected result
+        """
+        self.closed_curve_loop_list = closed_curve_loop_list
+        self.validate()
+
+    def validate(self):
+        endpoints = {}
+        for curve in self.closed_curve_loop_list:
+            endpoint_1 = curve.control_points[0]
+            endpoint_2 = curve.control_points[-1]
+            for endpoint_to_test in [endpoint_1, endpoint_2]:
+                for endpoint in endpoints:
+                    if endpoint.almost_equals(endpoint_to_test):
+                        endpoints[endpoint] = True
+                        break
+                else:
+                    endpoints[endpoint_to_test] = False
+
+        for v in endpoints.values():
+            if v:
+                continue
+            raise ValueError("Assigned curve loop is not closed")
+
+    def get_control_point_loop(self) -> typing.List[Point3D]:
+        # Copy a list of the curves
+        curve_stack = deepcopy(self.closed_curve_loop_list)
+
+        # Get points for first curve. This will set the starting point and the direction of the curve loop.
+        point_loop = curve_stack.pop(0).control_points
+
+        while curve_stack:  # Loop until the curve stack is empty
+            for curve_idx, curve in enumerate(curve_stack):
+                if point_loop[-1].almost_equals(curve.control_points[0]):
+                    point_loop.extend(curve_stack.pop(curve_idx).control_points[1:])
+                    break  # Go to the next curve in the stack
+                elif point_loop[-1].almost_equals(curve.control_points[-1]):
+                    point_loop.extend(curve_stack.pop(curve_idx).control_points[:-1][::-1])
+                    break  # Go to the next curve in the stack
+
+        return point_loop
+
+    @staticmethod
+    def get_representative_point(control_point_loop: typing.List[Point3D]) -> Point3D:
+        loop_array = np.array([p.as_array() for p in control_point_loop])
+
+        # Need to convert to 2-D to use shapely. Get the coordinate system of the plane containing the points
+        # using cross products of vectors described by the points
+        v1 = Vector3D(control_point_loop[0], control_point_loop[1])
+        v2 = Vector3D(control_point_loop[0], control_point_loop[2])
+        v3 = v1.cross(v2)
+        v4 = v1.cross(v3)
+
+        # The coordinate system is now fully described by v1, v3, and v4. v1 and v4 are the in-plane components,
+        # while v3 is the out-of-plane component. The origin of this coordinate system is at control_point_loop[0].
+        loop_array_transformed = astk.transform_points_into_coordinate_system(
+            loop_array, [v1, v4, v3], [astk.IHat3D(), astk.JHat3D(), astk.KHat3D()]
+        )
+        loop_array_2d = loop_array_transformed[:, :2]
+        z_plane = loop_array_transformed[0, 2]
+
+        # Create the polygon and find a point representing the center of the polygon while guaranteed to be inside
+        # the polygon
+        polygon = shapely.Polygon(loop_array_2d)
+        representative_point_2d = np.array(polygon.representative_point().coords[0])
+        representative_point_3d = np.append(representative_point_2d, 0.0)
+        representative_point_3d[2] += z_plane
+
+        # Transform the point back into the original coordinate system
+        reverse_transformed_point = astk.transform_points_into_coordinate_system(
+            np.array([representative_point_3d]), [astk.IHat3D(), astk.JHat3D(), astk.KHat3D()], [v1, v4, v3]
+        )
+        # reverse_transformed_point[0][0] += z_plane
+        return Point3D.from_array(reverse_transformed_point[0])
+
+    def generate(self) -> typing.List[Surface]:
+        surfs = []
+
+        control_point_loop = self.get_control_point_loop()
+        representative_point = self.get_representative_point(control_point_loop)
+
+        for curve in self.closed_curve_loop_list:
+            control_points_2 = [representative_point] * len(curve.control_points)
+            surface_control_points = [curve.control_points, control_points_2]
+            if isinstance(curve, Bezier3D):
+                surf = BezierSurface(surface_control_points)
+                surfs.append(surf)
+            elif isinstance(curve, RationalBezierCurve3D):
+                weights = np.ones(curve.weights.shape)
+                surf = RationalBezierSurface(surface_control_points, np.stack((curve.weights, weights), axis=0))
+            elif isinstance(curve, BSpline3D):
+                knots_u = curve.knot_vector
+                knots_v = np.array([0.0, 0.0, 1.0, 1.0])  # Linear clamped knot vector
+                control_point_array = np.array([[p.as_array() for p in p_row] for p_row in surface_control_points])
+                surf = NURBSSurface(control_point_array, knots_u, knots_v,
+                                    np.ones((len(surface_control_points), len(surface_control_points[0]))),
+                                    curve.degree, 1)
+            elif isinstance(curve, NURBSCurve3D):
+                knots_u = curve.knot_vector
+                knots_v = np.array([0.0, 0.0, 1.0, 1.0])  # Linear clamped knot vector
+                control_point_array = np.array([[p.as_array() for p in p_row] for p_row in surface_control_points])
+                weights_2 = np.ones(curve.weights.shape)
+                weights = np.stack((curve.weights, weights_2), axis=0)
+                surf = NURBSSurface(control_point_array, knots_u, knots_v, weights, curve.degree, 1)
+            else:
+                raise ValueError(f"Invalid curve type {type(curve)}")
+
+            surfs.append(surf)
+
+        return surfs

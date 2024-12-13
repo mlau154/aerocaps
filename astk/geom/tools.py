@@ -94,8 +94,8 @@ def find_t_corresponding_to_minimum_distance_to_point3d(curve: PCurve3D, point: 
 
 
 def sweep_along_curve(primary_curve: Bezier3D, guide_curve: Bezier3D):
-    point_list_3d = [primary_curve.points]
-    for prev_point, current_point in zip(guide_curve.points[:-1], guide_curve.points[1:]):
+    point_list_3d = [primary_curve.control_points]
+    for prev_point, current_point in zip(guide_curve.control_points[:-1], guide_curve.control_points[1:]):
         point_list_3d.append([primary_point + current_point - prev_point for primary_point in point_list_3d[-1]])
     return np.array([[[point.x.m, point.y.m, point.z.m] for point in v] for v in point_list_3d])
 
@@ -113,8 +113,8 @@ def rotate_about_axis(points: np.ndarray, axis: Vector3D, angle: Angle) -> np.nd
 
 
 def rotate_point_about_axis(p: Point3D, ax: Line3D, angle: Angle) -> Point3D:
-    reverse_transformation = Transformation3D(tx=[-ax.p0.x.m], ty=[-ax.p0.y.m], tz=[-ax.p0.z.m])
-    forward_transformation = Transformation3D(tx=[ax.p0.x.m], ty=[ax.p0.y.m], tz=[ax.p0.z.m])
+    reverse_transformation = Transformation3D(tx=-ax.p0.x.m, ty=-ax.p0.y.m, tz=-ax.p0.z.m)
+    forward_transformation = Transformation3D(tx=ax.p0.x.m, ty=ax.p0.y.m, tz=ax.p0.z.m)
     p_mat = np.array([p.as_array()])
     p_mat = reverse_transformation.transform(p_mat)
     p_mat = rotate_about_axis(p_mat, ax.get_vector(), angle)

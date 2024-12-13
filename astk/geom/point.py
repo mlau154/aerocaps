@@ -71,6 +71,9 @@ class Point3D(Geometry3D):
     def from_array(cls, arr: np.ndarray, unit: str = "m"):
         return cls(x=Length(**{unit: arr[0]}), y=Length(**{unit: arr[1]}), z=Length(**{unit: arr[2]}))
 
+    def almost_equals(self, other: "Point3D"):
+        return all([np.isclose(self_xyz, other_xyz) for self_xyz, other_xyz in zip(self.as_array(), other.as_array())])
+
     def plot(self, plot: pv.Plotter, **point_kwargs):
         plot.add_points(np.array([self.as_array()]), **point_kwargs)
 

@@ -9,7 +9,12 @@ from astk.units.unit import Unit
 
 __all__ = [
     "Vector2D",
-    "Vector3D"
+    "Vector3D",
+    "IHat2D",
+    "JHat2D",
+    "IHat3D",
+    "JHat3D",
+    "KHat3D"
 ]
 
 
@@ -85,3 +90,28 @@ class Vector3D:
 
     def mag(self) -> Length:
         return Length(m=np.sqrt(np.sum(self.as_array()**2)))
+
+
+class IHat2D(Vector2D):
+    def __init__(self):
+        super().__init__(p0=Origin2D(), p1=Point2D.from_array(np.array([1.0, 0.0])))
+
+
+class JHat2D(Vector2D):
+    def __init__(self):
+        super().__init__(p0=Origin2D(), p1=Point2D.from_array(np.array([0.0, 1.0])))
+
+
+class IHat3D(Vector3D):
+    def __init__(self):
+        super().__init__(p0=Origin3D(), p1=Point3D.from_array(np.array([1.0, 0.0, 0.0])))
+
+
+class JHat3D(Vector3D):
+    def __init__(self):
+        super().__init__(p0=Origin3D(), p1=Point3D.from_array(np.array([0.0, 1.0, 0.0])))
+
+
+class KHat3D(Vector3D):
+    def __init__(self):
+        super().__init__(p0=Origin3D(), p1=Point3D.from_array(np.array([0.0, 0.0, 1.0])))

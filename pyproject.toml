@@ -35,7 +35,8 @@ dependencies = [
     "numpy",
     "matplotlib",
     "pyvista",
-    "pyiges"
+    "pyiges",
+    "shapely"
 ]
 dynamic = ["version"]
 
