@@ -55,10 +55,10 @@ navigation_depth = 2  # For the table of contents
 
 html_static_path = ['_static']
 
-# html_css_files = [
-#     'css/custom.css',
-# ]
-#
+html_css_files = [
+    'css/custom.css',
+]
+
 # html_logo = "_static/pymead-logo.png"
-#
-# autosectionlabel_prefix_document = False
+
+autosectionlabel_prefix_document = False

@@ -23,3 +23,8 @@ Contents
     :maxdepth: 5
 
     install
+
+.. toctree::
+   :maxdepth: 3
+
+   api

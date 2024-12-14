@@ -1,0 +1,12 @@
+html[data-theme="dark"] {
+    --bs-body-bg: 33,37,41;
+}
+
+table.no-border-table td {
+    border: none;
+}
+
+table.max-width-table {
+    width: 500px;
+    max-width: 100%;
+}
