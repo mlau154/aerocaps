@@ -2,9 +2,9 @@ import typing
 
 import numpy as np
 
-from astk.geom.point import Point3D, Origin3D, Point2D, Origin2D
-from astk.units.length import Length
-from astk.units.unit import Unit
+from aerocaps.geom.point import Point3D, Origin3D, Point2D, Origin2D
+from aerocaps.units.length import Length
+from aerocaps.units.unit import Unit
 
 
 __all__ = [

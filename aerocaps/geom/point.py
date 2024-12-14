@@ -3,10 +3,10 @@ from copy import deepcopy
 import numpy as np
 import pyvista as pv
 
-from astk.units.length import Length
-from astk.geom import Geometry2D, Geometry3D
-import astk.iges.entity
-import astk.iges.point
+from aerocaps.units.length import Length
+from aerocaps.geom import Geometry2D, Geometry3D
+import aerocaps.iges.entity
+import aerocaps.iges.point
 
 
 __all__ = [
@@ -51,8 +51,8 @@ class Point3D(Geometry3D):
         self.y = y
         self.z = z
 
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.point.PointIGES(self.as_array())
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.point.PointIGES(self.as_array())
 
     def projection_on_principal_plane(self, plane: str = "XY") -> Point2D:
         if plane == "XY":

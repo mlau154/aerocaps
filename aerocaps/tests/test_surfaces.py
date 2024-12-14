@@ -6,14 +6,14 @@ import pyvista as pv
 print(os.getcwd())
 
 
-#from astk import DATA_DIR
-from astk.geom.point import Point3D
-from astk.geom.surfaces import NURBSSurface, BezierSurface, RationalBezierSurface, SurfaceEdge
-from astk.geom.curves import Bezier3D,Line3D
-from astk.geom import NegativeWeightError
-from astk.units.angle import Angle
-from astk.iges.iges_generator import IGESGenerator
-from astk import TEST_DIR
+#from aerocaps import DATA_DIR
+from aerocaps.geom.point import Point3D
+from aerocaps.geom.surfaces import NURBSSurface, BezierSurface, RationalBezierSurface, SurfaceEdge
+from aerocaps.geom.curves import Bezier3D,Line3D
+from aerocaps.geom import NegativeWeightError
+from aerocaps.units.angle import Angle
+from aerocaps.iges.iges_generator import IGESGenerator
+from aerocaps import TEST_DIR
 
 
 

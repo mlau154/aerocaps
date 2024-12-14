@@ -1,5 +1,5 @@
-from astk.geom.point import Point3D, Origin3D
-from astk.units.length import Length
+from aerocaps.geom.point import Point3D, Origin3D
+from aerocaps.units.length import Length
 
 
 __all__ = [

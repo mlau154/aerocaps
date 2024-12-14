@@ -1,13 +1,13 @@
 import os.path
 import typing
 
-from astk.geom.intersection import intersection_of_line_and_plane
-from astk.geom.curves import Line3D
-from astk.geom.plane import Plane
-import astk.iges.curves
-from astk.iges.start_end_section import StartSection, EndSection
-from astk.iges.global_params import GlobalParams
-from astk.iges.entity import IGESEntity, MultiEntityContainer
+from aerocaps.geom.intersection import intersection_of_line_and_plane
+from aerocaps.geom.curves import Line3D
+from aerocaps.geom.plane import Plane
+import aerocaps.iges.curves
+from aerocaps.iges.start_end_section import StartSection, EndSection
+from aerocaps.iges.global_params import GlobalParams
+from aerocaps.iges.entity import IGESEntity, MultiEntityContainer
 
 
 class IGESGenerator:
@@ -84,4 +84,4 @@ class IGESGenerator:
     def generate_line(line: Line3D, start_plane: Plane, end_plane: Plane):
         start_point = intersection_of_line_and_plane(line, start_plane)
         end_point = intersection_of_line_and_plane(line, end_plane)
-        return astk.iges.curves.LineIGES(start_point=start_point.as_array(), end_point=end_point.as_array())
+        return aerocaps.iges.curves.LineIGES(start_point=start_point.as_array(), end_point=end_point.as_array())

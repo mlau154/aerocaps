@@ -1,4 +1,4 @@
-from astk.iges import global_section_col_width
+from aerocaps.iges import global_section_col_width
 
 
 class StartSection:

@@ -1,7 +1,7 @@
-from astk.geom.curves import Line3D
-from astk.geom.plane import Plane
-from astk.geom.point import Point3D
-from astk.geom.vector import Vector3D
+from aerocaps.geom.curves import Line3D
+from aerocaps.geom.plane import Plane
+from aerocaps.geom.point import Point3D
+from aerocaps.geom.vector import Vector3D
 
 
 __all__ = [

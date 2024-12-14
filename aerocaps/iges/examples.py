@@ -1,11 +1,11 @@
 import numpy as np
 
-from astk.iges.iges_generator import IGESGenerator
-from astk.iges.curves import LineIGES, BezierIGES, BoundaryCurveIGES, CircularArcIGES
-from astk.iges.surfaces import RuledSurfaceIGES, BoundedSurfaceIGES
-from astk.iges.transformation import TransformationMatrixIGES
-from astk.units.angle import Angle
-from astk.units.length import Length
+from aerocaps.iges.iges_generator import IGESGenerator
+from aerocaps.iges.curves import LineIGES, BezierIGES, BoundaryCurveIGES, CircularArcIGES
+from aerocaps.iges.surfaces import RuledSurfaceIGES, BoundedSurfaceIGES
+from aerocaps.iges.transformation import TransformationMatrixIGES
+from aerocaps.units.angle import Angle
+from aerocaps.units.length import Length
 
 
 def generate_planar_surface_iges(file_name: str):

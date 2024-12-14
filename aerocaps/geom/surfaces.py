@@ -7,18 +7,18 @@ import pyvista as pv
 from scipy.optimize import fsolve
 import shapely
 
-import astk.iges.entity
-import astk.iges.curves
-import astk.iges.surfaces
-from astk.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
-from astk.geom.point import Point3D
-from astk.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
-import astk
-from astk.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis
-from astk.geom.vector import Vector3D
-from astk.units.angle import Angle
-from astk.units.length import Length
-from astk.utils.math import bernstein_poly
+import aerocaps.iges.entity
+import aerocaps.iges.curves
+import aerocaps.iges.surfaces
+from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
+from aerocaps.geom.point import Point3D
+from aerocaps.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
+import aerocaps
+from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis
+from aerocaps.geom.vector import Vector3D
+from aerocaps.units.angle import Angle
+from aerocaps.units.length import Length
+from aerocaps.utils.math import bernstein_poly
 
 
 __all__ = [
@@ -64,8 +64,8 @@ class BezierSurface(Surface):
         self.Nu = self.degree_u + 1
         self.Nv = self.degree_v + 1
 
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.surfaces.BezierSurfaceIGES(self.get_control_point_array())
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.surfaces.BezierSurfaceIGES(self.get_control_point_array())
 
     def get_control_point_array(self) -> np.ndarray:
         return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
@@ -569,8 +569,8 @@ class RationalBezierSurface(Surface):
         self.degree_v = degree_v
         self.Nu, self.Nv = len(points), len(points[0])
 
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.surfaces.RationalBSplineSurfaceIGES(
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.surfaces.RationalBSplineSurfaceIGES(
             control_points=self.get_control_point_array(),
             knots_u=self.knots_u,
             knots_v=self.knots_v,
@@ -1461,8 +1461,8 @@ class NURBSSurface(Surface):
         self.possible_spans_u, self.possible_span_indices_u = self._get_possible_spans(self.knots_u)
         self.possible_spans_v, self.possible_span_indices_v = self._get_possible_spans(self.knots_v)
 
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.surfaces.RationalBSplineSurfaceIGES(
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.surfaces.RationalBSplineSurfaceIGES(
             control_points=self.control_points,
             knots_u=self.knots_u,
             knots_v=self.knots_v,
@@ -1677,11 +1677,11 @@ class TrimmedSurface(Surface):
         raise NotImplementedError("Evaluation not yet implemented for trimmed surfaces")
 
     def to_iges(self,
-                untrimmed_surface_iges: astk.iges.surfaces.IGESEntity,
-                outer_boundary_iges: astk.iges.curves.CurveOnParametricSurfaceIGES,
-                inner_boundaries_iges: typing.List[astk.iges.curves.CurveOnParametricSurfaceIGES] = None,
-                *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.surfaces.TrimmedSurfaceIGES(
+                untrimmed_surface_iges: aerocaps.iges.surfaces.IGESEntity,
+                outer_boundary_iges: aerocaps.iges.curves.CurveOnParametricSurfaceIGES,
+                inner_boundaries_iges: typing.List[aerocaps.iges.curves.CurveOnParametricSurfaceIGES] = None,
+                *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.surfaces.TrimmedSurfaceIGES(
             untrimmed_surface_iges,
             outer_boundary_iges,
             inner_boundaries_iges
@@ -1756,8 +1756,8 @@ class PlanarFillSurfaceCreator:
 
         # The coordinate system is now fully described by v1, v3, and v4. v1 and v4 are the in-plane components,
         # while v3 is the out-of-plane component. The origin of this coordinate system is at control_point_loop[0].
-        loop_array_transformed = astk.transform_points_into_coordinate_system(
-            loop_array, [v1, v4, v3], [astk.IHat3D(), astk.JHat3D(), astk.KHat3D()]
+        loop_array_transformed = aerocaps.transform_points_into_coordinate_system(
+            loop_array, [v1, v4, v3], [aerocaps.IHat3D(), aerocaps.JHat3D(), aerocaps.KHat3D()]
         )
         # Make sure that all the curves are coplanar
         if not all([np.isclose(z, loop_array_transformed[0, 2]) for z in loop_array_transformed[1:, 2]]):
@@ -1783,8 +1783,8 @@ class PlanarFillSurfaceCreator:
 
         # Get parametric curves in the plane defined by the envelope for each curve in the ordered curve list
         for curve in ordered_curve_list:
-            cps_transformed = astk.transform_points_into_coordinate_system(
-                curve.get_control_point_array(), [v1, v4, v3], [astk.IHat3D(), astk.JHat3D(), astk.KHat3D()]
+            cps_transformed = aerocaps.transform_points_into_coordinate_system(
+                curve.get_control_point_array(), [v1, v4, v3], [aerocaps.IHat3D(), aerocaps.JHat3D(), aerocaps.KHat3D()]
             )
             cps_x = cps_transformed[:, 0]
             cps_y = cps_transformed[:, 1]
@@ -1809,8 +1809,8 @@ class PlanarFillSurfaceCreator:
         envelope_3d = np.column_stack((envelope_2d, z_plane * np.ones(envelope_2d.shape[0])))
 
         # Transform the newly created envelope back into the original coordinate system
-        reverse_transformed_envelope_3d = astk.transform_points_into_coordinate_system(
-            envelope_3d, [astk.IHat3D(), astk.JHat3D(), astk.KHat3D()], [v1, v4, v3]
+        reverse_transformed_envelope_3d = aerocaps.transform_points_into_coordinate_system(
+            envelope_3d, [aerocaps.IHat3D(), aerocaps.JHat3D(), aerocaps.KHat3D()], [v1, v4, v3]
         )
 
         # Create a planar rectangular surface from the transformed points
@@ -1818,7 +1818,7 @@ class PlanarFillSurfaceCreator:
         pb = Point3D.from_array(reverse_transformed_envelope_3d[1, :])
         pc = Point3D.from_array(reverse_transformed_envelope_3d[2, :])
         pd = Point3D.from_array(reverse_transformed_envelope_3d[3, :])
-        planar_surf = astk.BezierSurface([[pa, pd], [pb, pc]])
+        planar_surf = aerocaps.BezierSurface([[pa, pd], [pb, pc]])
 
         return parametric_curves, planar_surf
 
@@ -1831,23 +1831,23 @@ class PlanarFillSurfaceCreator:
 
         return ordered_curve_list, parametric_curves, planar_surf
 
-    def to_iges(self) -> typing.List[astk.iges.entity.IGESEntity]:
+    def to_iges(self) -> typing.List[aerocaps.iges.entity.IGESEntity]:
         entities = []
         ordered_curve_list, parametric_curves, planar_surf = self.generate()
 
         # Create the composite curves
-        composite = astk.CompositeCurve3D(ordered_curve_list)
-        composite_para = astk.CompositeCurve3D(parametric_curves)
+        composite = aerocaps.CompositeCurve3D(ordered_curve_list)
+        composite_para = aerocaps.CompositeCurve3D(parametric_curves)
 
         # Create the definition for the parametric curve
-        curve_on_parametric_surface = astk.CurveOnParametricSurface(
+        curve_on_parametric_surface = aerocaps.CurveOnParametricSurface(
             planar_surf,
             composite_para,
             composite
         )
 
         # Create the trimmed surface object
-        trimmed_surf = astk.TrimmedSurface(planar_surf, curve_on_parametric_surface)
+        trimmed_surf = aerocaps.TrimmedSurface(planar_surf, curve_on_parametric_surface)
 
         # Compile the list of entities
         K1 = len(ordered_curve_list)

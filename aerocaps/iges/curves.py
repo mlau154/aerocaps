@@ -2,10 +2,10 @@ import typing
 
 import numpy as np
 
-from astk.iges.entity import IGESEntity
-from astk.iges.iges_param import IGESParam
-from astk.units.angle import Angle
-from astk.units.length import Length
+from aerocaps.iges.entity import IGESEntity
+from aerocaps.iges.iges_param import IGESParam
+from aerocaps.units.angle import Angle
+from aerocaps.units.length import Length
 
 
 class CircularArcIGES(IGESEntity):

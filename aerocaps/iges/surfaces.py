@@ -3,10 +3,10 @@ import typing
 import numpy as np
 from numpy.ma.core import inner
 
-from astk.iges.curves import BoundaryCurveIGES, CurveOnParametricSurfaceIGES
-from astk.units.angle import Angle
-from astk.iges.entity import IGESEntity
-from astk.iges.iges_param import IGESParam
+from aerocaps.iges.curves import BoundaryCurveIGES, CurveOnParametricSurfaceIGES
+from aerocaps.units.angle import Angle
+from aerocaps.iges.entity import IGESEntity
+from aerocaps.iges.iges_param import IGESParam
 
 
 class SurfaceOfRevolutionIGES(IGESEntity):

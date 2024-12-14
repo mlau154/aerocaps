@@ -6,16 +6,16 @@ import pyvista as pv
 from matplotlib import pyplot as plt
 from scipy.optimize import fsolve
 
-import astk.iges
-import astk.iges.curves
-import astk.iges.entity
-from astk.geom import Geometry2D, Geometry3D, NegativeWeightError
-from astk.geom.point import Point2D, Point3D
-from astk.geom.transformation import Transformation2D, Transformation3D
-from astk.geom.vector import Vector3D, Vector2D
-from astk.units.angle import Angle
-from astk.units.length import Length
-from astk.utils.math import nchoosek
+import aerocaps.iges
+import aerocaps.iges.curves
+import aerocaps.iges.entity
+from aerocaps.geom import Geometry2D, Geometry3D, NegativeWeightError
+from aerocaps.geom.point import Point2D, Point3D
+from aerocaps.geom.transformation import Transformation2D, Transformation3D
+from aerocaps.geom.vector import Vector3D, Vector2D
+from aerocaps.units.angle import Angle
+from aerocaps.units.length import Length
+from aerocaps.utils.math import nchoosek
 
 
 __all__ = [
@@ -144,7 +144,7 @@ class Line2D(PCurve2D):
             raise ValueError("Must specify either angle theta or p1")
         self.p0 = p0
         self.theta = theta
-        from astk.geom.tools import measure_distance_between_points  # Avoid circular import
+        from aerocaps.geom.tools import measure_distance_between_points  # Avoid circular import
         self.d = d if not p1 else Length(m=measure_distance_between_points(p0, p1))
         self.p1 = self.evaluate_point2d(1.0) if not p1 else p1
         self.control_points = [self.p0, self.p1]
@@ -205,13 +205,13 @@ class Line3D(PCurve3D):
         self.p0 = p0
         self.theta = theta
         self.phi = phi
-        from astk.geom.tools import measure_distance_between_points  # Avoid circular import
+        from aerocaps.geom.tools import measure_distance_between_points  # Avoid circular import
         self.d = d if not p1 else Length(m=measure_distance_between_points(p0, p1))
         self.p1 = self.evaluate_point3d(1.0) if not p1 else p1
         self.control_points = [self.p0, self.p1]
 
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.curves.LineIGES(self.p0.as_array(), self.p1.as_array())
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.curves.LineIGES(self.p0.as_array(), self.p1.as_array())
 
     def from_iges(self):
         pass
@@ -573,8 +573,8 @@ class Bezier3D(PCurve3D):
         self.degree = None
         self.curve_connections = []
 
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.curves.BezierIGES(
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.curves.BezierIGES(
             control_points_XYZ=self.get_control_point_array(),
         )
 
@@ -858,8 +858,8 @@ class NURBSCurve3D(Geometry3D):
         self.degree = degree
         self.possible_spans, self.possible_span_indices = self._get_possible_spans()
 
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.curves.RationalBSplineCurveIGES(
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.curves.RationalBSplineCurveIGES(
             knots=self.knot_vector,
             weights=self.weights,
             control_points_XYZ=self.control_points,
@@ -983,8 +983,8 @@ class RationalBezierCurve3D(Geometry3D):
         assert self.knot_vector.ndim == 1
         assert len(self.knot_vector) == len(control_points) + self.degree + 1
 
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.curves.RationalBSplineCurveIGES(
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.curves.RationalBSplineCurveIGES(
             knots=self.knot_vector,
             weights=self.weights,
             control_points_XYZ=self.get_control_point_array(),
@@ -1155,8 +1155,8 @@ class BSpline3D(Geometry3D):
         self.degree = degree
         self.possible_spans, self.possible_span_indices = self._get_possible_spans()
 
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.curves.RationalBSplineCurveIGES(
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.curves.RationalBSplineCurveIGES(
             knots=self.knot_vector,
             weights=self.weights,
             control_points_XYZ=self.control_points,
@@ -1252,28 +1252,28 @@ class CompositeCurve3D(Geometry3D):
     def __init__(self, curves: typing.List[PCurve3D]):
         self.curves = curves
 
-    def to_iges(self, curve_iges_entities: typing.List[astk.iges.entity.IGESEntity],
-                *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.curves.CompositeCurveIGES(
+    def to_iges(self, curve_iges_entities: typing.List[aerocaps.iges.entity.IGESEntity],
+                *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.curves.CompositeCurveIGES(
             curve_iges_entities
         )
 
 
 class CurveOnParametricSurface(Geometry3D):
     def __init__(self,
-                 surface: astk.geom.Surface,
-                 parametric_curve: astk.geom.Geometry3D,
-                 model_space_curve: astk.geom.Geometry3D):
+                 surface: aerocaps.geom.Surface,
+                 parametric_curve: aerocaps.geom.Geometry3D,
+                 model_space_curve: aerocaps.geom.Geometry3D):
         self.surface = surface
         self.parametric_curve = parametric_curve
         self.model_space_curve = model_space_curve
 
     def to_iges(self,
-                surface_iges: astk.iges.entity.IGESEntity,
-                parametric_curve: astk.iges.entity.IGESEntity,
-                model_space_curve: astk.iges.entity.IGESEntity,
-                *args, **kwargs) -> astk.iges.entity.IGESEntity:
-        return astk.iges.curves.CurveOnParametricSurfaceIGES(
+                surface_iges: aerocaps.iges.entity.IGESEntity,
+                parametric_curve: aerocaps.iges.entity.IGESEntity,
+                model_space_curve: aerocaps.iges.entity.IGESEntity,
+                *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.curves.CurveOnParametricSurfaceIGES(
             surface_iges,
             parametric_curve,
             model_space_curve

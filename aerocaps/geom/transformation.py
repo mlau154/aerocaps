@@ -3,7 +3,7 @@ import typing
 import numpy as np
 import numpy.linalg as la
 
-from astk.geom.vector import Vector3D
+from aerocaps.geom.vector import Vector3D
 
 __all__ = [
     "Transformation2D",

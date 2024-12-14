@@ -2,7 +2,7 @@ from abc import abstractmethod
 
 import numpy as np
 
-import astk.iges.entity
+import aerocaps.iges.entity
 
 
 class Geometry2D:
@@ -11,7 +11,7 @@ class Geometry2D:
 
 class Geometry3D:
     @abstractmethod
-    def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         pass
 
 

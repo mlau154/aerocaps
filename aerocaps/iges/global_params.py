@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from astk.iges.iges_param import IGESParam
-from astk.iges import global_section_col_width
+from aerocaps.iges.iges_param import IGESParam
+from aerocaps.iges import global_section_col_width
 
 
 class GlobalParams:
@@ -26,16 +26,16 @@ class GlobalParams:
                              f"input was {units}")
         self.parameter_delimiter_char = IGESParam(",", "string")
         self.record_delimiter_char = IGESParam(";", "string")
-        self.product_id_sender = IGESParam("astk_geometry", "string")
+        self.product_id_sender = IGESParam("aerocaps_geometry", "string")
         self.file_name = IGESParam("", "none")
-        self._native_system_id = IGESParam(f"astk", "string")
-        self._preprocessor_version = IGESParam(f"astk", "string")
+        self._native_system_id = IGESParam(f"aerocaps", "string")
+        self._preprocessor_version = IGESParam(f"aerocaps", "string")
         self.binary_bits_int = IGESParam(32, "int")
         self.max_power_sp = IGESParam(38, "int")  # single-precision
         self.sig_digits_sp = IGESParam(16, "int")  # single-precision
         self.max_power_dp = IGESParam(38, "int")  # double-precision
         self.sig_digits_dp = IGESParam(16, "int")  # double-precision
-        self.product_id_receiver = IGESParam("astk_geometry", "string")
+        self.product_id_receiver = IGESParam("aerocaps_geometry", "string")
         self.model_space_scale = IGESParam(1.0, "real")
         self.units_flag = IGESParam(self.units_indicators[units][0], "int")
         self.units_name = IGESParam(self.units_indicators[units][1], "string")

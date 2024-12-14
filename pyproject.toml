@@ -3,11 +3,11 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "astk"
+name = "aerocaps"
 authors = [
     {name = "Matthew G Lauer", email = "mlauer2015@gmail.com"}
 ]
-description = "Toolkit for 3-D parametric design of aerodynamic surfaces"
+description = "Toolkit for design of Class-A, parametric design of aerodynamic surfaces"
 readme = "README.md"
 requires-python = ">=3.10"
 keywords = [
@@ -42,15 +42,15 @@ dynamic = ["version"]
 
 [tool.setuptools]
 packages = [
-    "astk",
-    "astk.geom",
-    "astk.iges",
-    "astk.scripts",
-    "astk.stl",
-    "astk.tests",
-    "astk.units",
-    "astk.utils"
+    "aerocaps",
+    "aerocaps.geom",
+    "aerocaps.iges",
+    "aerocaps.scripts",
+    "aerocaps.stl",
+    "aerocaps.tests",
+    "aerocaps.units",
+    "aerocaps.utils"
 ]
 
 [tool.setuptools.dynamic]
-version = {attr = "astk.version.__version__"}
+version = {attr = "aerocaps.version.__version__"}

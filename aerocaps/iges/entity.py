@@ -1,6 +1,6 @@
 import typing
 
-from astk.iges.iges_param import IGESParam
+from aerocaps.iges.iges_param import IGESParam
 
 
 class IGESEntity:

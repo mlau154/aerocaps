@@ -1,11 +1,11 @@
 import numpy as np
 from scipy.optimize import minimize_scalar
 
-from astk.geom.curves import Bezier3D, PCurve2D, PCurve3D, Line3D
-from astk.geom.point import Point3D, Point2D
-from astk.geom.transformation import Transformation3D
-from astk.geom.vector import Vector3D
-from astk.units.angle import Angle
+from aerocaps.geom.curves import Bezier3D, PCurve2D, PCurve3D, Line3D
+from aerocaps.geom.point import Point3D, Point2D
+from aerocaps.geom.transformation import Transformation3D
+from aerocaps.geom.vector import Vector3D
+from aerocaps.units.angle import Angle
 
 
 __all__ = [

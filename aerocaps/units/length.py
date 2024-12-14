@@ -1,5 +1,5 @@
-from astk.units.unit import Unit
-from astk.units.area import Area
+from aerocaps.units.unit import Unit
+from aerocaps.units.area import Area
 
 
 __all__ = [

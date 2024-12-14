@@ -1,4 +1,4 @@
-from astk.units.unit import Unit
+from aerocaps.units.unit import Unit
 
 
 __all__ = [

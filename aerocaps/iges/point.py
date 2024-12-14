@@ -1,7 +1,7 @@
 import numpy as np
 
-from astk.iges.entity import IGESEntity
-from astk.iges.iges_param import IGESParam
+from aerocaps.iges.entity import IGESEntity
+from aerocaps.iges.iges_param import IGESParam
 
 
 class PointIGES(IGESEntity):

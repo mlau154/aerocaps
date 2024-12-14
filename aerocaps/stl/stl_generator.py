@@ -2,7 +2,7 @@ import typing
 
 import numpy as np
 
-from astk.geom import Surface
+from aerocaps.geom import Surface
 
 
 class STLGenerator:
@@ -15,7 +15,7 @@ class STLGenerator:
 
     def generate(self, file_name: str):
         with open(file_name, "w") as stl_file:
-            stl_file.write("solid astk\n")
+            stl_file.write("solid aerocaps\n")
 
             for geom in self.geoms:
                 point_array = geom.evaluate(self.N, self.N)
@@ -42,4 +42,4 @@ class STLGenerator:
                         stl_file.write(f"    endloop\n")
                         stl_file.write(f"endfacet\n")
 
-            stl_file.write("endsolid astk\n")
+            stl_file.write("endsolid aerocaps\n")

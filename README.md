@@ -1,2 +1,2 @@
-# astk
-Toolkit for 3-D parametric design of aerodynamic surfaces
+# AeroCaps
+Toolkit for design of Class-A, parametric design of aerodynamic surfaces
