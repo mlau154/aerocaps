@@ -111,6 +111,9 @@ class BoundaryCurveIGES(IGESEntity):
                  curves_needing_reversal: typing.List[int] = None,
                  **entity_kwargs
                  ):
+        """
+        IGES Type 141
+        """
         if curves_needing_reversal is None:
             curves_needing_reversal = []
         number_parameter_space_curves = sum([len(parameter_space_curves) for parameter_space_curves in curves.values()])
@@ -133,12 +136,27 @@ class BoundaryCurveIGES(IGESEntity):
 
 class CurveOnParametricSurfaceIGES(IGESEntity):
     def __init__(self, surface: IGESEntity, parametric_curve: IGESEntity, model_space_curve: IGESEntity, **entity_kwargs):
+        """
+        IGES Type 142
+        """
         parametric_curve.status_number.value = 5
         parameter_data = [
             IGESParam(0, "int"),
             IGESParam(surface, "pointer"),
             IGESParam(parametric_curve, "pointer"),
             IGESParam(model_space_curve, "pointer"),
-            IGESParam(1, "int")
+            IGESParam(3, "int")
         ]
         super().__init__(142, parameter_data, **entity_kwargs)
+
+
+class CompositeCurveIGES(IGESEntity):
+    def __init__(self, curves: typing.List[IGESEntity], **entity_kwargs):
+        """
+        IGES Type 102
+        """
+        parameter_data = [
+            IGESParam(len(curves), "int"),
+            *[IGESParam(curve, "pointer") for curve in curves]
+        ]
+        super().__init__(102, parameter_data, **entity_kwargs)

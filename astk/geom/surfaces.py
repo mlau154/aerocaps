@@ -8,8 +8,9 @@ from scipy.optimize import fsolve
 import shapely
 
 import astk.iges.entity
+import astk.iges.curves
 import astk.iges.surfaces
-from astk.geom import Surface, InvalidGeometryError, NegativeWeightError
+from astk.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
 from astk.geom.point import Point3D
 from astk.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
 import astk
@@ -26,7 +27,8 @@ __all__ = [
     "BezierSurface",
     "RationalBezierSurface",
     "NURBSSurface",
-    "FillSurfaceCreator"
+    "PlanarFillSurfaceCreator",
+    "TrimmedSurface"
 ]
 
 
@@ -1425,8 +1427,32 @@ class NURBSSurface(Surface):
         plot.add_points(point_arr, **point_kwargs)
 
 
-class FillSurfaceCreator:
-    def __init__(self, closed_curve_loop_list: typing.List[Bezier3D or RationalBezierCurve3D or NURBSCurve3D or BSpline3D]):
+class TrimmedSurface(Surface):
+    def __init__(self,
+                 untrimmed_surface: Surface,
+                 outer_boundary: Geometry3D,
+                 inner_boundaries: typing.List[Geometry3D] = None):
+        self.untrimmed_surface = untrimmed_surface
+        self.outer_boundary = outer_boundary
+        self.inner_boundaries = inner_boundaries
+
+    def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
+        raise NotImplementedError("Evaluation not yet implemented for trimmed surfaces")
+
+    def to_iges(self,
+                untrimmed_surface_iges: astk.iges.surfaces.IGESEntity,
+                outer_boundary_iges: astk.iges.curves.CurveOnParametricSurfaceIGES,
+                inner_boundaries_iges: typing.List[astk.iges.curves.CurveOnParametricSurfaceIGES] = None,
+                *args, **kwargs) -> astk.iges.entity.IGESEntity:
+        return astk.iges.surfaces.TrimmedSurfaceIGES(
+            untrimmed_surface_iges,
+            outer_boundary_iges,
+            inner_boundaries_iges
+        )
+
+
+class PlanarFillSurfaceCreator:
+    def __init__(self, closed_curve_loop_list: typing.List[Bezier3D or RationalBezierCurve3D or NURBSCurve3D or BSpline3D or Line3D]):
         """
         Generator class for fill surfaces comprised of point-curve polar-like patches.
 
@@ -1454,9 +1480,12 @@ class FillSurfaceCreator:
                 continue
             raise ValueError("Assigned curve loop is not closed")
 
-    def get_control_point_loop(self) -> typing.List[Point3D]:
+    def get_ordered_curve_list(self) -> (
+            typing.List[Bezier3D or NURBSCurve3D or BSpline3D or RationalBezierCurve3D or Line3D],
+            typing.List[Point3D]):
         # Copy a list of the curves
         curve_stack = deepcopy(self.closed_curve_loop_list)
+        ordered_curve_list = [deepcopy(curve_stack[0])]
 
         # Get points for first curve. This will set the starting point and the direction of the curve loop.
         point_loop = curve_stack.pop(0).control_points
@@ -1464,17 +1493,22 @@ class FillSurfaceCreator:
         while curve_stack:  # Loop until the curve stack is empty
             for curve_idx, curve in enumerate(curve_stack):
                 if point_loop[-1].almost_equals(curve.control_points[0]):
+                    ordered_curve_list.append(curve)
                     point_loop.extend(curve_stack.pop(curve_idx).control_points[1:])
                     break  # Go to the next curve in the stack
                 elif point_loop[-1].almost_equals(curve.control_points[-1]):
+                    ordered_curve_list.append(curve.reverse())
                     point_loop.extend(curve_stack.pop(curve_idx).control_points[:-1][::-1])
                     break  # Go to the next curve in the stack
 
-        return point_loop
+        return ordered_curve_list, point_loop
 
     @staticmethod
-    def get_representative_point(control_point_loop: typing.List[Point3D]) -> Point3D:
+    def get_envelope(ordered_curve_list: typing.List[
+        Bezier3D or BSpline3D or NURBSCurve3D or RationalBezierCurve3D or Line3D],
+                     control_point_loop: typing.List[Point3D]) -> (list, BezierSurface):
         loop_array = np.array([p.as_array() for p in control_point_loop])
+        parametric_curves = []
 
         # Need to convert to 2-D to use shapely. Get the coordinate system of the plane containing the points
         # using cross products of vectors described by the points
@@ -1488,55 +1522,105 @@ class FillSurfaceCreator:
         loop_array_transformed = astk.transform_points_into_coordinate_system(
             loop_array, [v1, v4, v3], [astk.IHat3D(), astk.JHat3D(), astk.KHat3D()]
         )
+        # Make sure that all the curves are coplanar
+        if not all([np.isclose(z, loop_array_transformed[0, 2]) for z in loop_array_transformed[1:, 2]]):
+            raise ValueError("Curves are not all coplanar!")
         loop_array_2d = loop_array_transformed[:, :2]
         z_plane = loop_array_transformed[0, 2]
 
         # Create the polygon and find a point representing the center of the polygon while guaranteed to be inside
         # the polygon
         polygon = shapely.Polygon(loop_array_2d)
-        representative_point_2d = np.array(polygon.representative_point().coords[0])
-        representative_point_3d = np.append(representative_point_2d, 0.0)
-        representative_point_3d[2] += z_plane
+        envelope_2d = np.array(shapely.envelope(polygon).exterior.coords)
+        envelope_2d[0, 0] -= 3.0
+        envelope_2d[0, 1] -= 3.0
+        envelope_2d[1, 0] += 3.0
+        envelope_2d[1, 1] -= 3.0
+        envelope_2d[2, 0] += 3.0
+        envelope_2d[2, 1] += 3.0
+        envelope_2d[3, 0] -= 3.0
+        envelope_2d[3, 1] += 3.0
+        x_min, x_max = envelope_2d[:, 0].min(), envelope_2d[:, 0].max()
+        y_min, y_max = envelope_2d[:, 1].min(), envelope_2d[:, 1].max()
+        dx, dy = (x_max - x_min), (y_max - y_min)
 
-        # Transform the point back into the original coordinate system
-        reverse_transformed_point = astk.transform_points_into_coordinate_system(
-            np.array([representative_point_3d]), [astk.IHat3D(), astk.JHat3D(), astk.KHat3D()], [v1, v4, v3]
-        )
-        # reverse_transformed_point[0][0] += z_plane
-        return Point3D.from_array(reverse_transformed_point[0])
-
-    def generate(self) -> typing.List[Surface]:
-        surfs = []
-
-        control_point_loop = self.get_control_point_loop()
-        representative_point = self.get_representative_point(control_point_loop)
-
-        for curve in self.closed_curve_loop_list:
-            control_points_2 = [representative_point] * len(curve.control_points)
-            surface_control_points = [curve.control_points, control_points_2]
-            if isinstance(curve, Bezier3D):
-                surf = BezierSurface(surface_control_points)
-                surfs.append(surf)
-            elif isinstance(curve, RationalBezierCurve3D):
-                weights = np.ones(curve.weights.shape)
-                surf = RationalBezierSurface(surface_control_points, np.stack((curve.weights, weights), axis=0))
+        # Get parametric curves in the plane defined by the envelope for each curve in the ordered curve list
+        for curve in ordered_curve_list:
+            cps_transformed = astk.transform_points_into_coordinate_system(
+                curve.get_control_point_array(), [v1, v4, v3], [astk.IHat3D(), astk.JHat3D(), astk.KHat3D()]
+            )
+            cps_x = cps_transformed[:, 0]
+            cps_y = cps_transformed[:, 1]
+            u = [(cp_x - x_min) / dx for cp_x in cps_x]
+            v = [(cp_y - y_min) / dy for cp_y in cps_y]
+            uv = np.array([u, v]).T
+            uv0 = np.column_stack((uv, np.zeros(uv.shape[0])))
+            if isinstance(curve, Line3D):
+                parametric_curve = curve.__class__(p0=Point3D.from_array(uv0[0, :]), p1=Point3D.from_array(uv0[1, :]))
+            elif isinstance(curve, Bezier3D):
+                parametric_curve = curve.__class__.generate_from_array(uv0)
             elif isinstance(curve, BSpline3D):
-                knots_u = curve.knot_vector
-                knots_v = np.array([0.0, 0.0, 1.0, 1.0])  # Linear clamped knot vector
-                control_point_array = np.array([[p.as_array() for p in p_row] for p_row in surface_control_points])
-                surf = NURBSSurface(control_point_array, knots_u, knots_v,
-                                    np.ones((len(surface_control_points), len(surface_control_points[0]))),
-                                    curve.degree, 1)
+                parametric_curve = curve.__class__(uv0, curve.knot_vector, curve.degree)
+            elif isinstance(curve, RationalBezierCurve3D):
+                parametric_curve = curve.__class__.generate_from_array(uv0, curve.weights)
             elif isinstance(curve, NURBSCurve3D):
-                knots_u = curve.knot_vector
-                knots_v = np.array([0.0, 0.0, 1.0, 1.0])  # Linear clamped knot vector
-                control_point_array = np.array([[p.as_array() for p in p_row] for p_row in surface_control_points])
-                weights_2 = np.ones(curve.weights.shape)
-                weights = np.stack((curve.weights, weights_2), axis=0)
-                surf = NURBSSurface(control_point_array, knots_u, knots_v, weights, curve.degree, 1)
+                parametric_curve = curve.__class__(uv0, curve.weights, curve.knot_vector, curve.degree)
             else:
                 raise ValueError(f"Invalid curve type {type(curve)}")
+            parametric_curves.append(parametric_curve)
 
-            surfs.append(surf)
+        envelope_3d = np.column_stack((envelope_2d, z_plane * np.ones(envelope_2d.shape[0])))
 
-        return surfs
+        # Transform the newly created envelope back into the original coordinate system
+        reverse_transformed_envelope_3d = astk.transform_points_into_coordinate_system(
+            envelope_3d, [astk.IHat3D(), astk.JHat3D(), astk.KHat3D()], [v1, v4, v3]
+        )
+
+        # Create a planar rectangular surface from the transformed points
+        pa = Point3D.from_array(reverse_transformed_envelope_3d[0, :])
+        pb = Point3D.from_array(reverse_transformed_envelope_3d[1, :])
+        pc = Point3D.from_array(reverse_transformed_envelope_3d[2, :])
+        pd = Point3D.from_array(reverse_transformed_envelope_3d[3, :])
+        planar_surf = astk.BezierSurface([[pa, pd], [pb, pc]])
+
+        return parametric_curves, planar_surf
+
+    def generate(self) -> (list, list, BezierSurface):
+
+        ordered_curve_list, control_point_loop = self.get_ordered_curve_list()
+        parametric_curves, planar_surf = self.get_envelope(
+            ordered_curve_list, control_point_loop
+        )
+
+        return ordered_curve_list, parametric_curves, planar_surf
+
+    def to_iges(self) -> typing.List[astk.iges.entity.IGESEntity]:
+        entities = []
+        ordered_curve_list, parametric_curves, planar_surf = self.generate()
+
+        # Create the composite curves
+        composite = astk.CompositeCurve3D(ordered_curve_list)
+        composite_para = astk.CompositeCurve3D(parametric_curves)
+
+        # Create the definition for the parametric curve
+        curve_on_parametric_surface = astk.CurveOnParametricSurface(
+            planar_surf,
+            composite_para,
+            composite
+        )
+
+        # Create the trimmed surface object
+        trimmed_surf = astk.TrimmedSurface(planar_surf, curve_on_parametric_surface)
+
+        # Compile the list of entities
+        K1 = len(ordered_curve_list)
+        K2 = K1 + len(parametric_curves)
+        entities = [curve.to_iges() for curve in ordered_curve_list]
+        entities.extend([curve.to_iges() for curve in parametric_curves])
+        entities.append(composite.to_iges(entities[0:K1]))
+        entities.append(composite_para.to_iges(entities[K1:K2]))
+        entities.append(planar_surf.to_iges())
+        entities.append(curve_on_parametric_surface.to_iges(entities[K2 + 2], entities[K2 + 1], entities[K2]))
+        entities.append(trimmed_surf.to_iges(entities[K2 + 2], entities[K2 + 3]))
+
+        return entities

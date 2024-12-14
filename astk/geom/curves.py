@@ -30,7 +30,9 @@ __all__ = [
     "Bezier3D",
     "BSpline3D",
     "RationalBezierCurve3D",
-    "NURBSCurve3D"
+    "NURBSCurve3D",
+    "CompositeCurve3D",
+    "CurveOnParametricSurface"
 ]
 
 
@@ -145,6 +147,7 @@ class Line2D(PCurve2D):
         from astk.geom.tools import measure_distance_between_points  # Avoid circular import
         self.d = d if not p1 else Length(m=measure_distance_between_points(p0, p1))
         self.p1 = self.evaluate_point2d(1.0) if not p1 else p1
+        self.control_points = [self.p0, self.p1]
 
     def evaluate_point2d(self, t: float) -> Point2D:
         if self.theta:
@@ -205,12 +208,19 @@ class Line3D(PCurve3D):
         from astk.geom.tools import measure_distance_between_points  # Avoid circular import
         self.d = d if not p1 else Length(m=measure_distance_between_points(p0, p1))
         self.p1 = self.evaluate_point3d(1.0) if not p1 else p1
+        self.control_points = [self.p0, self.p1]
 
     def to_iges(self, *args, **kwargs) -> astk.iges.entity.IGESEntity:
         return astk.iges.curves.LineIGES(self.p0.as_array(), self.p1.as_array())
 
     def from_iges(self):
         pass
+
+    def get_control_point_array(self, unit: str = "m") -> np.ndarray:
+        return np.array([p.as_array(unit=unit) for p in self.control_points])
+
+    def reverse(self) -> "Line3D":
+        return self.__class__(p0=self.p1, p1=self.p0)
 
     def projection_on_principal_plane(self, plane: str = "XY") -> Line2D:
         return Line2D(p0=self.p0.projection_on_principal_plane(plane), p1=self.p1.projection_on_principal_plane(plane))
@@ -568,6 +578,9 @@ class Bezier3D(PCurve3D):
             control_points_XYZ=self.get_control_point_array(),
         )
 
+    def reverse(self) -> "Bezier3D":
+        return self.__class__(self.control_points[::-1])
+
     def projection_on_principal_plane(self, plane: str = "XY") -> Bezier2D:
         return Bezier2D(control_points=[pt.projection_on_principal_plane(plane) for pt in self.control_points])
 
@@ -853,6 +866,12 @@ class NURBSCurve3D(Geometry3D):
             degree=self.degree
         )
 
+    def reverse(self) -> "NURBSCurve3D":
+        return self.__class__(np.flipud(self.control_points),
+                              self.weights[::-1],
+                              (1.0 - self.knot_vector)[::-1],
+                              self.degree)
+
     def evaluate_ndarray(self, t: float) -> np.ndarray:
         """
         Evaluate the NURBS curve at parameter t
@@ -971,6 +990,10 @@ class RationalBezierCurve3D(Geometry3D):
             control_points_XYZ=self.get_control_point_array(),
             degree=self.degree
         )
+
+    def reverse(self) -> "RationalBezierCurve3D":
+        return self.__class__(self.control_points[::-1],
+                              self.weights[::-1])
 
     def evaluate_ndarray(self, t: float) -> np.ndarray:
         """
@@ -1140,6 +1163,11 @@ class BSpline3D(Geometry3D):
             degree=self.degree
         )
 
+    def reverse(self) -> "BSpline3D":
+        return self.__class__(np.flipud(self.control_points),
+                              (1.0 - self.knot_vector)[::-1],
+                              self.degree)
+
     def evaluate_ndarray(self, t: float) -> np.ndarray:
         """
         Evaluate the NURBS curve at parameter t
@@ -1218,6 +1246,38 @@ class BSpline3D(Geometry3D):
                 return knot_span_idx
         if t == self.possible_spans[-1][1]:
             return self.possible_span_indices[-1]
+
+
+class CompositeCurve3D(Geometry3D):
+    def __init__(self, curves: typing.List[PCurve3D]):
+        self.curves = curves
+
+    def to_iges(self, curve_iges_entities: typing.List[astk.iges.entity.IGESEntity],
+                *args, **kwargs) -> astk.iges.entity.IGESEntity:
+        return astk.iges.curves.CompositeCurveIGES(
+            curve_iges_entities
+        )
+
+
+class CurveOnParametricSurface(Geometry3D):
+    def __init__(self,
+                 surface: astk.geom.Surface,
+                 parametric_curve: astk.geom.Geometry3D,
+                 model_space_curve: astk.geom.Geometry3D):
+        self.surface = surface
+        self.parametric_curve = parametric_curve
+        self.model_space_curve = model_space_curve
+
+    def to_iges(self,
+                surface_iges: astk.iges.entity.IGESEntity,
+                parametric_curve: astk.iges.entity.IGESEntity,
+                model_space_curve: astk.iges.entity.IGESEntity,
+                *args, **kwargs) -> astk.iges.entity.IGESEntity:
+        return astk.iges.curves.CurveOnParametricSurfaceIGES(
+            surface_iges,
+            parametric_curve,
+            model_space_curve
+        )
 
 
 def main():

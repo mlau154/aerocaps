@@ -1,8 +1,9 @@
 import typing
 
 import numpy as np
+from numpy.ma.core import inner
 
-from astk.iges.curves import BoundaryCurveIGES
+from astk.iges.curves import BoundaryCurveIGES, CurveOnParametricSurfaceIGES
 from astk.units.angle import Angle
 from astk.iges.entity import IGESEntity
 from astk.iges.iges_param import IGESParam
@@ -36,6 +37,18 @@ class BoundedSurfaceIGES(IGESEntity):
                  untrimmed_surface: IGESEntity,
                  boundary_curves: typing.List[BoundaryCurveIGES],
                  **entity_kwargs):
+        """
+        IGES Type 143
+
+        Parameters
+        ----------
+        untrimmed_surface: IGESEntity
+            Surface in which the boundary curves reside
+        boundary_curves: typing.List[BoundaryCurveIGES]
+            Closed loop of boundary curves that lie on the surface specified by ``untrimmed_surface``
+        entity_kwargs
+            Additional keyword arguments to pass to the ``IGESEntity`` constructor
+        """
         parameter_data = [
             IGESParam(int(any(
                 [boundary_curve.parameter_data[0].value == 1 for boundary_curve in boundary_curves])), "int"
@@ -45,6 +58,41 @@ class BoundedSurfaceIGES(IGESEntity):
             *[IGESParam(boundary_curve, "pointer") for boundary_curve in boundary_curves]
         ]
         super().__init__(143, parameter_data, **entity_kwargs)
+
+
+class TrimmedSurfaceIGES(IGESEntity):
+    def __init__(self,
+                 untrimmed_surface: IGESEntity,
+                 outer_boundary: CurveOnParametricSurfaceIGES,
+                 inner_boundaries: typing.List[CurveOnParametricSurfaceIGES] = None,
+                 outer_boundary_is_boundary_of_surface: bool = False,
+                 **entity_kwargs
+                 ):
+        """
+        Trimmed Surface, IGES type 144.
+
+        Parameters
+        ----------
+        untrimmed_surface: IGESEntity
+            Surface in which the boundary curves reside
+        outer_boundary: CurveOnParametricSurfaceIGES
+            Curve on a parametric surface representing the outer boundary for the trimmed surface
+        inner_boundaries: typing.List[CurveOnParametricSurfaceIGES]
+            List of inner boundary curves
+        outer_boundary_is_boundary_of_surface: bool
+            Whether the outer boundary represents the actual outer boundary of the untrimmed surface. Default: ``False``
+        entity_kwargs
+            Additional keyword arguments to pass to the ``IGESEntity`` constructor
+        """
+        inner_boundaries = [] if inner_boundaries is None else inner_boundaries
+        parameter_data = [
+            IGESParam(untrimmed_surface, "pointer"),
+            IGESParam(int(outer_boundary_is_boundary_of_surface), "int"),
+            IGESParam(len(inner_boundaries), "int"),
+            IGESParam(outer_boundary, "pointer"),
+            *[IGESParam(inner_boundary, "pointer") for inner_boundary in inner_boundaries]
+        ]
+        super().__init__(144, parameter_data, **entity_kwargs)
 
 
 class RationalBSplineSurfaceIGES(IGESEntity):
