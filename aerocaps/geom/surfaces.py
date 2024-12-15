@@ -56,6 +56,63 @@ class SurfaceCorner(Enum):
 
 class BezierSurface(Surface):
     def __init__(self, points: typing.List[typing.List[Point3D]] or np.ndarray):
+        r"""
+        A Bézier surface is a parametric surface described by a matrix of control points and defined on a rectangular
+        domain :math:`\{u \in [0,1], v \in [0,1]\}`. The mathematical expression for the Bézier surface is identical
+        to that of the Bézier curve except with an extra dimension:
+
+        .. math::
+
+            \mathbf{S}(u,v) = \sum\limits_{i=0}^n \sum\limits_{j=0}^m B_{i,n}(u) B_{j,m}(v) \mathbf{P}_{i,j}
+
+        Where :math:`B_{i,n}(t)` is the Bernstein polynomial given by
+
+        .. math::
+
+            B_{i,n}(t) = {n \choose i} t^i (1-t)^{n-i}
+
+        An example of a Bézier surface with :math:`n=2` and :math:`m=3` is shown below. Note that the only control
+        points that lie directly on the surface are the corner points of the control point mesh. This is analogous
+        to the fact that only the starting and ending control points of Bézier curves lie directly on the curve.
+        In fact, Bézier curves derived from the bounding rows and columns of control points exactly represent the
+        boundary curves of the surface. In this example, the control points given by :math:`\mathbf{P}_{i,j=0}` and
+        :math:`\mathbf{P}_{i,j=m}` represent quadratic Bézier curves (:math:`n=2`), and the control points given by
+        :math:`\mathbf{P}_{i=0,j}` and :math:`\mathbf{P}_{i=n,j}` represent cubic Bézier curves (:math:`m=3`).
+
+        .. figure:: ../images/bezier_surf_2x3.*
+            :width: 600
+            :align: center
+
+            A :math:`2 \times 3` Bézier surface with control points and control point net lines shown
+
+        .. figure:: ../images/bezier_surf_2x3_mesh_only.*
+            :width: 600
+            :align: center
+
+            A :math:`2 \times 3` Bézier surface with isoparametric curves in both :math:`u` and :math:`v` shown
+
+        Bézier surfaces can be constructed either via the default constructor with a nested list of
+        ``aerocaps.geom.point.Point3D`` objects of by means of the ``generate_from_array`` class method where only a
+        3-D ``numpy`` array is required. For example, say we have six ``Point3D`` objects, A-F and would like to use
+        them to create a :math:`2 \times 1` Bézier surface.
+        Using the default constructor,
+
+        .. code-block:: python
+
+            surf = BezierSurface([[pA, pB], [pC, pD], [pE, pF]])
+
+        Using the array class method and point :math:`xyz` float values given by ``pA_x``, ``pA_y``, ``pA_z``, etc.,
+
+        .. code-block:: python
+
+            control_points = np.array([
+                [[pA_x, pA_y, pA_z], [pB_x, pB_y, pB_z]],
+                [[pC_x, pC_y, pC_z], [pD_x, pD_y, pD_z]],
+                [[pE_x, pE_y, pE_z], [pF_x, pF_y, pF_z]],
+            ])
+
+            surf = BezierSurface.generate_from_array(control_points)
+        """
         if isinstance(points, np.ndarray):
             points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
         self.points = points

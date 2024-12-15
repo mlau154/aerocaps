@@ -43,6 +43,7 @@ dynamic = ["version"]
 [tool.setuptools]
 packages = [
     "aerocaps",
+    "aerocaps.examples",
     "aerocaps.geom",
     "aerocaps.iges",
     "aerocaps.scripts",

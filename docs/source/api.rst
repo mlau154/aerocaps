@@ -7,6 +7,7 @@ API
    :template: custom-module-template.rst
    :recursive:
 
+    aerocaps.examples
     aerocaps.geom
     aerocaps.iges
     aerocaps.stl
