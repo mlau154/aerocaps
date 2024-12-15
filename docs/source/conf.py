@@ -59,6 +59,6 @@ html_css_files = [
     'css/custom.css',
 ]
 
-# html_logo = "_static/pymead-logo.png"
+html_logo = "_static/aerocaps_logo.png"
 
 autosectionlabel_prefix_document = False
