@@ -324,8 +324,18 @@ class Bezier2D(PCurve2D):
 
     def __init__(self, control_points: typing.List[Point2D]):
         self.control_points = control_points
-        self.degree = None
+        self._degree = None
         self.curve_connections = []
+
+    @property
+    def degree(self):
+        return self._degree
+
+    @degree.setter
+    def degree(self, value):
+        raise AttributeError("The 'degree' property is read-only. Use the Bezier2D.elevate_degree method to increase"
+                             "the degree of the curve while retaining the shape, or manually add or remove control "
+                             "points to change the degree directly.")
 
     @staticmethod
     def bernstein_poly(n: int, i: int, t: int or float or np.ndarray):
@@ -544,6 +554,7 @@ class Bezier2D(PCurve2D):
         new_control_points[0, :] = P[0, :]
         new_control_points[-1, :] = P[-1, :]
 
+        # Update all the other control points
         for i in range(1, n + 1):  # 1 <= i <= n
             new_control_points[i, :] = i / (n + 1) * P[i - 1, :] + (1 - i / (n + 1)) * P[i, :]
 
@@ -595,8 +606,18 @@ class Bezier3D(PCurve3D):
 
     def __init__(self, control_points: typing.List[Point3D]):
         self.control_points = control_points
-        self.degree = None
+        self._degree = None
         self.curve_connections = []
+
+    @property
+    def degree(self):
+        return self._degree
+
+    @degree.setter
+    def degree(self, value):
+        raise AttributeError("The 'degree' property is read-only. Use the Bezier3D.elevate_degree method to increase"
+                             "the degree of the curve while retaining the shape, or manually add or remove control "
+                             "points to change the degree directly.")
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.curves.BezierIGES(
@@ -833,6 +854,7 @@ class Bezier3D(PCurve3D):
         new_control_points[0, :] = P[0, :]
         new_control_points[-1, :] = P[-1, :]
 
+        # Update all the other control points
         for i in range(1, n + 1):  # 1 <= i <= n
             new_control_points[i, :] = i / (n + 1) * P[i - 1, :] + (1 - i / (n + 1)) * P[i, :]
 
