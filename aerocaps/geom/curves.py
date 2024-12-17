@@ -324,12 +324,11 @@ class Bezier2D(PCurve2D):
 
     def __init__(self, control_points: typing.List[Point2D]):
         self.control_points = control_points
-        self._degree = None
         self.curve_connections = []
 
     @property
     def degree(self):
-        return self._degree
+        return len(self.control_points) - 1
 
     @degree.setter
     def degree(self, value):
@@ -606,12 +605,11 @@ class Bezier3D(PCurve3D):
 
     def __init__(self, control_points: typing.List[Point3D]):
         self.control_points = control_points
-        self._degree = None
         self.curve_connections = []
 
     @property
     def degree(self):
-        return self._degree
+        return len(self.control_points) - 1
 
     @degree.setter
     def degree(self, value):
