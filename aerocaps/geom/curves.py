@@ -524,6 +524,31 @@ class Bezier2D(PCurve2D):
         transformation = Transformation2D(**transformation_kwargs)
         return Bezier2D.generate_from_array(transformation.transform(self.get_control_point_array()))
 
+    def elevate_degree(self) -> "Bezier2D":
+        """
+        Elevates the degree of the Bézier curve. See algorithm source
+        `here <https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/Bezier/bezier-elev.html>`_.
+
+        Returns
+        -------
+        Bezier2D
+            A new Bézier curve with identical shape to the current one but with one additional control point.
+        """
+        n = self.degree
+        P = self.get_control_point_array()
+
+        # New array has one additional control point (current array only has n+1 control points)
+        new_control_points = np.zeros((P.shape[0] + 1, P.shape[1]))
+
+        # Set starting and ending control points to what they already were
+        new_control_points[0, :] = P[0, :]
+        new_control_points[-1, :] = P[-1, :]
+
+        for i in range(1, n + 1):  # 1 <= i <= n
+            new_control_points[i, :] = i / (n + 1) * P[i - 1, :] + (1 - i / (n + 1)) * P[i, :]
+
+        return Bezier2D.generate_from_array(new_control_points)
+
     def split(self, t_split: float):
 
         # Number of control points, curve degree, control point array
@@ -784,11 +809,36 @@ class Bezier3D(PCurve3D):
 
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
-    def transform(self, **transformation_kwargs):
+    def transform(self, **transformation_kwargs) -> "Bezier3D":
         transformation = Transformation3D(**transformation_kwargs)
         return Bezier3D.generate_from_array(transformation.transform(self.get_control_point_array()))
 
-    def split(self, t_split: float):
+    def elevate_degree(self) -> "Bezier3D":
+        """
+        Elevates the degree of the Bézier curve. See algorithm source
+        `here <https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/Bezier/bezier-elev.html>`_.
+
+        Returns
+        -------
+        Bezier3D
+            A new Bézier curve with identical shape to the current one but with one additional control point.
+        """
+        n = self.degree
+        P = self.get_control_point_array()
+
+        # New array has one additional control point (current array only has n+1 control points)
+        new_control_points = np.zeros((P.shape[0] + 1, P.shape[1]))
+
+        # Set starting and ending control points to what they already were
+        new_control_points[0, :] = P[0, :]
+        new_control_points[-1, :] = P[-1, :]
+
+        for i in range(1, n + 1):  # 1 <= i <= n
+            new_control_points[i, :] = i / (n + 1) * P[i - 1, :] + (1 - i / (n + 1)) * P[i, :]
+
+        return Bezier3D.generate_from_array(new_control_points)
+
+    def split(self, t_split: float) -> ("Bezier3D", "Bezier3D"):
 
         # Number of control points, curve degree, control point array
         n_ctrl_points = len(self.control_points)
