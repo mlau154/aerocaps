@@ -113,6 +113,14 @@ class BezierSurface(Surface):
             ])
 
             surf = BezierSurface.generate_from_array(control_points)
+
+        Parameters
+        ----------
+        points: typing.List[typing.List[Point3D]] or numpy.ndarray
+            Control points for the Bézier surface, either as a nested list of :obj:`~aerocaps.geom.point.Point3D`
+            objects or an :obj:`~numpy.ndarray` of size :math:`(n+1) \times (m+1) \times 3`,
+            where :math:`n` is the surface degree in the :math:`u`-parametric direction and :math:`m` is the
+            surface degree in the :math:`v`-parametric direction
         """
         if isinstance(points, np.ndarray):
             points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
