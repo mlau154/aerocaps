@@ -10,8 +10,8 @@ def bezier_surface_2x3() -> ac.BezierSurface:
 
     Returns
     -------
-    ac.BezierSurface
-        The :math:`2 \ times 3` Bézier surface
+    BezierSurface
+        The :math:`2 \times 3` Bézier surface
     """
     # Create three rows of control points that each influence the surface shape in the v-direction
     row_1 = np.array([
