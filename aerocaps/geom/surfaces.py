@@ -32,6 +32,16 @@ __all__ = [
 
 
 class SurfaceEdge(Enum):
+    """
+    Enum describing the name of each edge of a four-sided surface. The names are defined by the name and value of the
+    parameter that is constant along the edge.
+
+    .. figure:: ../images/cardinal_transparent.*
+        :width: 300
+        :align: center
+
+        Surface edge nomenclature
+    """
     v1 = 0
     v0 = 1
     u1 = 2
