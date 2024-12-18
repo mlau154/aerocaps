@@ -12,6 +12,10 @@ class Geometry2D:
 class Geometry3D:
     @abstractmethod
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        """
+        Converts the geometric object to an IGES entity. To add this IGES entity to an ``.igs`` file,
+        use an :obj:`~aerocaps.iges.iges_generator.IGESGenerator`.
+        """
         pass
 
 

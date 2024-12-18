@@ -11,8 +11,18 @@ from aerocaps.iges.entity import IGESEntity, MultiEntityContainer
 
 
 class IGESGenerator:
-    """Generates IGES files using a list of IGES entities"""
     def __init__(self, entities: typing.List[IGESEntity], units: str):
+        """
+        Creation class for an IGES file using a list of IGES entities. To generate the file, use the
+        :obj:`~aerocaps.iges.iges_generator.IGESGenerator.generate` method.
+
+        Parameters
+        ----------
+        entities: typing.List[IGESEntity]
+            List of IGES entities from which a file can be created
+        units: str
+            Output units to be stored in the IGES file
+        """
         self.entities = entities
         self.start = StartSection()
         self.globals = GlobalParams(units)
@@ -37,17 +47,16 @@ class IGESGenerator:
         Generates an IGES file containing all the information for the entities.
 
         Parameters
-        ==========
+        ----------
         file_name: str
-          File where the IGES data will be saved. If the file name does not end with the ".igs" or ".iges" extension,
-          it will be added automatically.
+            File where the IGES data will be saved. If the file name does not end with the ".igs" or ".iges" extension,
+            it will be added automatically.
 
         Returns
-        =======
+        -------
         str
-          The IGES data in Python string format
+            The IGES data in Python string format
         """
-
         # Assign integer values to the pointers
         self._assign_integer_values_to_pointers()
 
@@ -79,9 +88,3 @@ class IGESGenerator:
             f.write(iges_string)
 
         return iges_string
-
-    @staticmethod
-    def generate_line(line: Line3D, start_plane: Plane, end_plane: Plane):
-        start_point = intersection_of_line_and_plane(line, start_plane)
-        end_point = intersection_of_line_and_plane(line, end_plane)
-        return aerocaps.iges.curves.LineIGES(start_point=start_point.as_array(), end_point=end_point.as_array())
