@@ -496,6 +496,62 @@ class BezierSurface(Surface):
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
 
+    def elevate_degree_u(self) -> "BezierSurface":
+        """
+        Elevates the degree of the Bézier surface in the :math:`u`-parametric direction.
+
+        Returns
+        -------
+        BezierSurface
+            A new Bézier surface with identical shape to the current one but with one additional row of control points
+            in the :math:`u`-parametric direction
+        """
+        n = self.degree_u
+        m = self.degree_v
+        P = self.get_control_point_array()
+
+        # New array has one additional control point (current array only has n+1 control points)
+        new_control_points = np.zeros((P.shape[0] + 1, P.shape[1], P.shape[2]))
+
+        # Set starting and ending control points to what they already were
+        new_control_points[0, :, :] = P[0, :, :]
+        new_control_points[-1, :, :] = P[-1, :, :]
+
+        # Update all the other control points
+        for i in range(1, n + 1):  # 1 <= i <= n
+            for j in range(0, m + 1):  # for all j
+                new_control_points[i, j, :] = i / (n + 1) * P[i - 1, j, :] + (1 - i / (n + 1)) * P[i, j, :]
+
+        return Bezier3D.generate_from_array(new_control_points)
+
+    def elevate_degree_v(self) -> "BezierSurface":
+        """
+        Elevates the degree of the Bézier surface in the :math:`v`-parametric direction.
+
+        Returns
+        -------
+        BezierSurface
+            A new Bézier surface with identical shape to the current one but with one additional row of control points
+            in the :math:`v`-parametric direction
+        """
+        n = self.degree_u
+        m = self.degree_v
+        P = self.get_control_point_array()
+
+        # New array has one additional control point (current array only has n+1 control points)
+        new_control_points = np.zeros((P.shape[0], P.shape[1] + 1, P.shape[2]))
+
+        # Set starting and ending control points to what they already were
+        new_control_points[:, 0, :] = P[:, 0, :]
+        new_control_points[:, -1, :] = P[:, -1, :]
+
+        # Update all the other control points
+        for i in range(0, n + 1):  # for all i
+            for j in range(1, m + 1):  # 1 <= j <= m
+                new_control_points[i, j, :] = j / (m + 1) * P[i, j - 1, :] + (1 - j / (m + 1)) * P[i, j, :]
+
+        return Bezier3D.generate_from_array(new_control_points)
+
     def extract_isoparametric_curve_u(self, Nu: int, v: float):
         u_vec = np.linspace(0.0, 1.0, Nu)
         return np.array([self.evaluate_ndarray(u, v) for u in u_vec])
