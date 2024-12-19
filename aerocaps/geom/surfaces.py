@@ -1811,6 +1811,21 @@ class NURBSSurface(Surface):
         return np.array(
             [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])])
 
+    def extract_edge_curve(self, surface_edge: SurfaceEdge) -> NURBSCurve3D:
+        P = self.control_points
+        w = self.weights
+
+        if surface_edge == SurfaceEdge.u0:
+            return NURBSCurve3D(P[0, :, :], w[0, :], self.knots_v, self.degree_v)
+        if surface_edge == SurfaceEdge.u1:
+            return NURBSCurve3D(P[-1, :, :], w[-1, :], self.knots_v, self.degree_v)
+        if surface_edge == SurfaceEdge.v0:
+            return NURBSCurve3D(P[:, 0, :], w[:, 0], self.knots_u, self.degree_u)
+        if surface_edge == SurfaceEdge.v1:
+            return NURBSCurve3D(P[:, -1, :], w[:, -1], self.knots_u, self.degree_u)
+
+        raise ValueError(f"Invalid surface edge {surface_edge}")
+
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
 
         points = []
