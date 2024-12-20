@@ -1074,6 +1074,19 @@ class RationalBezierCurve3D(Geometry3D):
     def get_control_point_array(self) -> np.ndarray:
         return np.array([p.as_array() for p in self.control_points])
 
+    def get_homogeneous_control_points(self) -> np.ndarray:
+        r"""
+        Gets the array of control points in homogeneous coordinates, :math:`\mathbf{P}_i \cdot w_i`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n + 1) \times 4`, where :math:`n` is the curve degree. The four columns, in order,
+            represent the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
+            control point.
+        """
+        return np.column_stack((self.get_control_point_array(), self.weights))
+
     @classmethod
     def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
         return cls([Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in P], weights)
