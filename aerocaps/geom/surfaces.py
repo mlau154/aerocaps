@@ -230,7 +230,7 @@ class BezierSurface(Surface):
     def dSdv(self, u: float, v: float):
         r"""
         Evaluates the first derivative of the surface in the :math:`v`-direction,
-        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}`, at a given :math:`(u,v)` parameter pair.
+        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}`, at a given :math:`(u,v)` parameter pair.
 
         Parameters
         ----------
