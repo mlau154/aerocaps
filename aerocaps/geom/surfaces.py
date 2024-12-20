@@ -144,6 +144,17 @@ class BezierSurface(Surface):
         """
         return aerocaps.iges.surfaces.BezierSurfaceIGES(self.get_control_point_array())
 
+    def to_rational_bezier_surface(self) -> "RationalBezierSurface":
+        """
+        Converts the current non-rational Bézier surface to a rational Bézier surface by setting all weights to unity.
+
+        Returns
+        -------
+        RationalBezierSurface
+            Converted surface
+        """
+        return RationalBezierSurface(self.points, np.ones((self.degree_u + 1, self.degree_v + 1)))
+
     def get_control_point_array(self) -> np.ndarray:
         """
         Converts the nested list of control points to a 3-D :obj:`~numpy.ndarray`.
