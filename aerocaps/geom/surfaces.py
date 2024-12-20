@@ -491,7 +491,7 @@ class BezierSurface(Surface):
                     continue
                 assert np.isclose(dxdydz_ratio, current_f)
 
-    def evaluate_simple(self, u: float, v: float):
+    def evaluate_simple(self, u: float, v: float) -> Point3D:
         return Point3D.from_array(self.evaluate_ndarray(u, v))
 
     def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
@@ -622,17 +622,17 @@ class BezierSurface(Surface):
         v_vec = np.linspace(0.0, 1.0, Nv)
         return np.array([self.evaluate_ndarray(u, v) for v in v_vec])
 
-    def get_parallel_degree(self, surface_edge: SurfaceEdge):
+    def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_u
         return self.degree_v
 
-    def get_perpendicular_degree(self, surface_edge: SurfaceEdge):
+    def get_perpendicular_degree(self, surface_edge: SurfaceEdge) -> int:
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_v
         return self.degree_u
 
-    def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+    def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> Point3D:
         if surface_edge == SurfaceEdge.v1:
             return self.points[row_index][-(continuity_index + 1)]
         elif surface_edge == SurfaceEdge.v0:
