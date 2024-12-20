@@ -582,11 +582,43 @@ class BezierSurface(Surface):
 
         return BezierSurface.generate_from_array(new_control_points)
 
-    def extract_isoparametric_curve_u(self, Nu: int, v: float):
+    def extract_isoparametric_curve_u(self, Nu: int, v: float) -> np.ndarray:
+        r"""
+        Extracts a curve along the :math:`u`-direction at a fixed value of :math:`v`
+
+        Parameters
+        ----------
+        Nu: int
+            Number of points to evaluate, linearly spaced in :math:`u`
+        v: float
+            Constant value of :math:`v`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times 3` representing the :math:`x`-, :math:`y`-, and :math:`z`-coordinates
+            of the points evaluated along the isoparametric curve
+        """
         u_vec = np.linspace(0.0, 1.0, Nu)
         return np.array([self.evaluate_ndarray(u, v) for u in u_vec])
 
-    def extract_isoparametric_curve_v(self, Nv: int, u: float):
+    def extract_isoparametric_curve_v(self, Nv: int, u: float) -> np.ndarray:
+        r"""
+        Extracts a curve along the :math:`v`-direction at a fixed value of :math:`u`
+
+        Parameters
+        ----------
+        Nv: int
+            Number of points to evaluate, linearly spaced in :math:`u`
+        u: float
+            Constant value of :math:`v`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_v \times 3` representing the :math:`x`-, :math:`y`-, and :math:`z`-coordinates
+            of the points evaluated along the isoparametric curve
+        """
         v_vec = np.linspace(0.0, 1.0, Nv)
         return np.array([self.evaluate_ndarray(u, v) for v in v_vec])
 
