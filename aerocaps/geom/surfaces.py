@@ -1,3 +1,7 @@
+"""
+Parametric surface classes (two-dimensional geometric objects defined by parameters :math:`u` and :math:`v`
+that reside in three-dimensional space)
+"""
 import typing
 from copy import deepcopy
 from enum import Enum
@@ -56,6 +60,9 @@ class SurfaceCorner(Enum):
 
 
 class BezierSurface(Surface):
+    """
+    Bézier surface class. A NURBS surface with no internal knot spans and all weights equal to unity.
+    """
     def __init__(self, points: typing.List[typing.List[Point3D]] or np.ndarray):
         r"""
         A Bézier surface is a parametric surface described by a matrix of control points and defined on a rectangular
