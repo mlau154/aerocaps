@@ -1069,6 +1069,43 @@ class RationalBezierCurve3D(Geometry3D):
         return self.__class__(self.control_points[::-1],
                               self.weights[::-1])
 
+    def elevate_degree(self) -> "RationalBezierCurve3D":
+        """
+        Elevates the degree of the rational Bézier curve. Uses the same algorithm as degree elevation of a
+        non-rational Bézier curve with a necessary additional step of conversion to/from
+        `homogeneous coordinates <https://en.wikipedia.org/wiki/Homogeneous_coordinates>`_.
+
+        .. figure:: ../images/quarter_circle_degree_elevation.*
+            :width: 350
+            :align: center
+
+            Degree elevation of a quarter circle exactly represented by a rational Bézier curve
+
+        Returns
+        -------
+        RationalBezierCurve3D
+            A new rational Bézier curve with identical shape to the current one but with one additional control point.
+        """
+        n = self.degree
+        Pw = self.get_homogeneous_control_points()
+
+        # New array has one additional control point (current array only has n+1 control points)
+        new_homogeneous_control_points = np.zeros((Pw.shape[0] + 1, Pw.shape[1]))
+
+        # Set starting and ending control points to what they already were
+        new_homogeneous_control_points[0, :] = Pw[0, :]
+        new_homogeneous_control_points[-1, :] = Pw[-1, :]
+
+        # Update all the other control points
+        for i in range(1, n + 1):  # 1 <= i <= n
+            new_homogeneous_control_points[i, :] = i / (n + 1) * Pw[i - 1, :] + (1 - i / (n + 1)) * Pw[i, :]
+
+        # Project the homogeneous control points onto the w=1 hyperplane
+        new_weights = new_homogeneous_control_points[:, -1]
+        new_control_points = new_homogeneous_control_points[:, :-1] / np.repeat(new_weights[:, np.newaxis], 3, axis=1)
+
+        return RationalBezierCurve3D.generate_from_array(new_control_points, new_weights)
+
     def evaluate_ndarray(self, t: float) -> np.ndarray:
         """
         Evaluate the NURBS curve at parameter t
@@ -1089,7 +1126,10 @@ class RationalBezierCurve3D(Geometry3D):
             represent the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
             control point.
         """
-        return np.column_stack((self.get_control_point_array(), self.weights))
+        return np.column_stack((
+            self.get_control_point_array() * np.repeat(self.weights[:, np.newaxis], 3, axis=1),
+            self.weights
+        ))
 
     @classmethod
     def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
