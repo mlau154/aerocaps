@@ -1,3 +1,7 @@
+"""
+Parametric curve classes (one-dimensional geometric objects defined by parameter :math:`t` that reside in
+two- or three-dimensional space)
+"""
 import typing
 from abc import abstractmethod
 
