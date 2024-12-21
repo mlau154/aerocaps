@@ -19,8 +19,7 @@ from aerocaps.geom.transformation import Transformation2D, Transformation3D
 from aerocaps.geom.vector import Vector3D, Vector2D
 from aerocaps.units.angle import Angle
 from aerocaps.units.length import Length
-from aerocaps.utils.math import nchoosek
-
+from aerocaps.utils.math import bernstein_poly
 
 __all__ = [
     "PCurveData2D",
@@ -341,32 +340,6 @@ class Bezier2D(PCurve2D):
                              "points to change the degree directly.")
 
     @staticmethod
-    def bernstein_poly(n: int, i: int, t: int or float or np.ndarray):
-        r"""
-        Calculates the Bernstein polynomial for a given Bézier curve order, index, and parameter vector. The
-        Bernstein polynomial is described by
-
-        .. math::
-
-            B_{i,n}(t)={n \choose i} t^i (1-t)^{n-i}
-
-        Arguments
-        =========
-        n: int
-            Bézier curve degree (one less than the number of control points in the Bézier curve)
-        i: int
-            Bézier curve index
-        t: int, float, or np.ndarray
-            Parameter vector for the Bézier curve
-
-        Returns
-        =======
-        np.ndarray
-            Array of values of the Bernstein polynomial evaluated for each point in the parameter vector
-        """
-        return nchoosek(n, i) * t ** i * (1.0 - t) ** (n - i)
-
-    @staticmethod
     def finite_diff_P(P: np.ndarray, k: int, i: int):
         """Calculates the finite difference of the control points as shown in
         https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/Bezier/bezier-der.html
@@ -416,7 +389,7 @@ class Bezier2D(PCurve2D):
         """
         return np.sum(np.array([np.prod(np.array([degree - idx for idx in range(order)])) *
                                 np.array([self.finite_diff_P(P, order, i)]).T *
-                                np.array([self.bernstein_poly(degree - order, i, t)])
+                                np.array([bernstein_poly(degree - order, i, t)])
                                 for i in range(degree + 1 - order)]), axis=0).T
 
     def get_control_point_array(self, unit: str = "m") -> np.ndarray:
@@ -435,8 +408,8 @@ class Bezier2D(PCurve2D):
         x, y = 0.0, 0.0
         for i in range(n_ctrl_points):
             # Calculate the x- and y-coordinates of the Bézier curve given the input vector t
-            x += P[i, 0] * self.bernstein_poly(degree, i, t)
-            y += P[i, 1] * self.bernstein_poly(degree, i, t)
+            x += P[i, 0] * bernstein_poly(degree, i, t)
+            y += P[i, 1] * bernstein_poly(degree, i, t)
 
         return Point2D(x=Length(m=x), y=Length(m=y))
 
@@ -481,8 +454,8 @@ class Bezier2D(PCurve2D):
         x, y = np.zeros(t.shape), np.zeros(t.shape)
         for i in range(n_ctrl_points):
             # Calculate the x- and y-coordinates of the Bézier curve given the input vector t
-            x += P[i, 0] * self.bernstein_poly(degree, i, t)
-            y += P[i, 1] * self.bernstein_poly(degree, i, t)
+            x += P[i, 0] * bernstein_poly(degree, i, t)
+            y += P[i, 1] * bernstein_poly(degree, i, t)
         xy = np.column_stack((x, y))
 
         # Calculate the first derivative
@@ -633,32 +606,6 @@ class Bezier3D(PCurve3D):
         return Bezier2D(control_points=[pt.projection_on_principal_plane(plane) for pt in self.control_points])
 
     @staticmethod
-    def bernstein_poly(n: int, i: int, t: int or float or np.ndarray):
-        r"""
-        Calculates the Bernstein polynomial for a given Bézier curve order, index, and parameter vector. The
-        Bernstein polynomial is described by
-
-        .. math::
-
-            B_{i,n}(t)={n \choose i} t^i (1-t)^{n-i}
-
-        Arguments
-        =========
-        n: int
-            Bézier curve degree (one less than the number of control points in the Bézier curve)
-        i: int
-            Bézier curve index
-        t: int, float, or np.ndarray
-            Parameter vector for the Bézier curve
-
-        Returns
-        =======
-        np.ndarray
-            Array of values of the Bernstein polynomial evaluated for each point in the parameter vector
-        """
-        return nchoosek(n, i) * t ** i * (1.0 - t) ** (n - i)
-
-    @staticmethod
     def finite_diff_P(P: np.ndarray, k: int, i: int):
         """Calculates the finite difference of the control points as shown in
         https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/Bezier/bezier-der.html
@@ -708,7 +655,7 @@ class Bezier3D(PCurve3D):
         """
         return np.sum(np.array([np.prod(np.array([degree - idx for idx in range(order)])) *
                                 np.array([self.finite_diff_P(P, order, i)]).T *
-                                np.array([self.bernstein_poly(degree - order, i, t)])
+                                np.array([bernstein_poly(degree - order, i, t)])
                                 for i in range(degree + 1 - order)]), axis=0).T
 
     def get_control_point_array(self, unit: str = "m") -> np.ndarray:
@@ -729,9 +676,9 @@ class Bezier3D(PCurve3D):
         x, y, z = 0.0, 0.0, 0.0
         for i in range(n_ctrl_points):
             # Calculate the x- and y-coordinates of the Bézier curve given the input vector t
-            x += P[i, 0] * self.bernstein_poly(degree, i, t)
-            y += P[i, 1] * self.bernstein_poly(degree, i, t)
-            z += P[i, 2] * self.bernstein_poly(degree, i, t)
+            x += P[i, 0] * bernstein_poly(degree, i, t)
+            y += P[i, 1] * bernstein_poly(degree, i, t)
+            z += P[i, 2] * bernstein_poly(degree, i, t)
 
         return Point3D(x=Length(m=x), y=Length(m=y), z=Length(m=z))
 
@@ -776,9 +723,9 @@ class Bezier3D(PCurve3D):
         x, y, z = np.zeros(t.shape), np.zeros(t.shape), np.zeros(t.shape)
         for i in range(n_ctrl_points):
             # Calculate the x- and y-coordinates of the Bézier curve given the input vector t
-            x += P[i, 0] * self.bernstein_poly(degree, i, t)
-            y += P[i, 1] * self.bernstein_poly(degree, i, t)
-            z += P[i, 2] * self.bernstein_poly(degree, i, t)
+            x += P[i, 0] * bernstein_poly(degree, i, t)
+            y += P[i, 1] * bernstein_poly(degree, i, t)
+            z += P[i, 2] * bernstein_poly(degree, i, t)
         xyz = np.column_stack((x, y, z))
 
         # Calculate the first derivative
@@ -1028,7 +975,7 @@ class NURBSCurve3D(Geometry3D):
 
 class RationalBezierCurve3D(Geometry3D):
 
-    projection_dict = {
+    _projection_dict = {
         "X": 0,
         "Y": 1,
         "Z": 2,
@@ -1135,42 +1082,16 @@ class RationalBezierCurve3D(Geometry3D):
     def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
         return cls([Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in P], weights)
 
-    @staticmethod
-    def bernstein_poly(n: int, i: int, t: int or float or np.ndarray):
-        r"""
-        Calculates the Bernstein polynomial for a given Bézier curve order, index, and parameter vector. The
-        Bernstein polynomial is described by
-
-        .. math::
-
-            B_{i,n}(t)={n \choose i} t^i (1-t)^{n-i}
-
-        Arguments
-        =========
-        n: int
-            Bézier curve degree (one less than the number of control points in the Bézier curve)
-        i: int
-            Bézier curve index
-        t: int, float, or np.ndarray
-            Parameter vector for the Bézier curve
-
-        Returns
-        =======
-        np.ndarray
-            Array of values of the Bernstein polynomial evaluated for each point in the parameter vector
-        """
-        return nchoosek(n, i) * t ** i * (1.0 - t) ** (n - i)
-
     def evaluate_simple(self, t: float) -> Point3D:
         n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
         P = self.get_control_point_array()
 
         # Evaluate the curve
-        w_sum = sum([self.bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
-        x = sum([P[i, 0] * self.bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
-        y = sum([P[i, 1] * self.bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
-        z = sum([P[i, 2] * self.bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
+        w_sum = sum([bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
+        x = sum([P[i, 0] * bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
+        y = sum([P[i, 1] * bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
+        z = sum([P[i, 2] * bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
 
         return Point3D(x=Length(m=x / w_sum), y=Length(m=y / w_sum), z=Length(m=z / w_sum))
         # return Point3D(x=Length(m=x), y=Length(m=y), z=Length(m=z))
@@ -1186,13 +1107,13 @@ class RationalBezierCurve3D(Geometry3D):
         projection = "XYZ" if projection is None else projection
         t_vec = np.linspace(0.0, 1.0, 201) if t_vec is None else None
         data = self.evaluate(t_vec)
-        args = tuple([data[:, self.projection_dict[axis]] for axis in projection])
+        args = tuple([data[:, self._projection_dict[axis]] for axis in projection])
         ax.plot(*args, **plt_kwargs)
 
     def plot_control_points(self, ax: plt.Axes, projection: str = None, **plt_kwargs):
         projection = "XYZ" if projection is None else projection
         cps = self.get_control_point_array()
-        args = tuple([cps[:, self.projection_dict[axis]] for axis in projection])
+        args = tuple([cps[:, self._projection_dict[axis]] for axis in projection])
         ax.plot(*args, **plt_kwargs)
 
     def compute_curvature_at_t0(self) -> float:

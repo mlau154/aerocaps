@@ -1,3 +1,6 @@
+"""
+Math utilities
+"""
 from math import factorial
 from decimal import Decimal
 
@@ -13,20 +16,18 @@ def nchoosek(n: int, k: int):
       n \choose k
 
     Parameters
-    ==========
+    ----------
     n: int
       Number of elements in the set
-
     k: int
       Number of items to select from the set
 
     Returns
-    =======
+    -------
     :math:`n \choose k`
     """
 
     return float(Decimal(factorial(n)) / Decimal(factorial(k)) / Decimal(factorial(n - k)))
-
 
 
 def bernstein_poly(n: int, i: int, t: int or float or np.ndarray):
@@ -39,16 +40,16 @@ def bernstein_poly(n: int, i: int, t: int or float or np.ndarray):
         B_{i,n}(t)={n \choose i} t^i (1-t)^{n-i}
 
     Arguments
-    =========
+    ---------
     n: int
-        Bézier curve degree (one less than the number of control points in the Bézier curve)
+        Basis function degree
     i: int
-        Bézier curve index
+        Basis function index
     t: int, float, or np.ndarray
-        Parameter vector for the Bézier curve
+        Parameter vector for evaluation
 
     Returns
-    =======
+    -------
     np.ndarray
         Array of values of the Bernstein polynomial evaluated for each point in the parameter vector
     """
