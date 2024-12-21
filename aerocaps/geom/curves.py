@@ -135,12 +135,48 @@ class PCurve3D(Geometry3D):
 
 
 class Line2D(PCurve2D):
+    """
+    Two-dimensional line class
+    """
     def __init__(self,
                  p0: Point2D,
-                 theta: Angle = None,
                  p1: Point2D = None,
+                 theta: Angle = None,
                  d: Length = Length(m=1.0)
                  ):
+        r"""
+        Two-dimensional line defined by either two points or a point and an angle. If a second point (``p1``)
+        is defined, the curve will be evaluated as
+
+        .. math::
+
+            \begin{align}
+            x(t) &= x_0 + t (x_1 - x_0) \\
+            y(t) &= y_0 + t (y_1 - y_0)
+            \end{align}
+
+        If an angle (``theta``) is specified instead, the curve will be evaluated as
+
+        .. math::
+
+            \begin{align}
+            x(t) &= x_0 + d \cdot t \cdot \cos{\theta} \\
+            y(t) &= y_0 + d \cdot t \cdot \sin{\theta}
+            \end{align}
+
+        Parameters
+        ----------
+        p0: Point2D
+            Origin of the line
+        p1: Point2D or None
+            Endpoint of the line. If ``None``, ``theta`` must be specified. Default: ``None``
+        theta: Angle or None
+            Angle of the line (counter-clockwise positive, :math:`0^{\circ}` defined along the :math:`x`-axis).
+            If ``None``, ``p1`` must be specified. Default: ``None``
+        d: Length
+            Used in conjunction with ``theta`` to determine the point corresponding to :math:`t=1`. If ``p1`` is
+            specified, this value is not used. Default: ``Length(m=1.0)``
+        """
         if theta and p1:
             raise ValueError("Angle theta should not be specified if p1 is specified")
         if not theta and not p1:
@@ -194,11 +230,14 @@ class Line2D(PCurve2D):
 
 
 class Line3D(PCurve3D):
+    """
+    Three-dimensional line class
+    """
     def __init__(self,
                  p0: Point3D,
+                 p1: Point3D = None,
                  theta: Angle = None,
                  phi: Angle = None,
-                 p1: Point3D = None,
                  d: Length = Length(m=1.0)
                  ):
         if (theta and p1) or (phi and p1):
