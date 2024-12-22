@@ -965,9 +965,99 @@ class RationalBezierSurface(Surface):
     def get_control_point_array(self) -> np.ndarray:
         return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
 
-    def get_xyzw_array(self) -> np.ndarray:
-        return np.array([np.array([(p.as_array() * w).tolist() + [w] for p, w in zip(p_arr, w_arr)])
-                         for p_arr, w_arr in zip(self.points, self.weights)])
+    def get_homogeneous_control_points(self) -> np.ndarray:
+        r"""
+        Gets the array of control points in homogeneous coordinates, :math:`\mathbf{P}_{i,j} \cdot w_{i,j}`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n + 1) \times (m + 1) \times 4`,
+            where :math:`n` is the surface degree in the :math:`u`-direction and :math:`m` is the surface
+            degree in the :math:`v`-direction. The four elements of the last array dimension are, in order,
+            the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
+            control point.
+        """
+        return np.dstack((
+            self.get_control_point_array() * np.repeat(self.weights[:, :, np.newaxis], 3, axis=2),
+            self.weights
+        ))
+
+    @staticmethod
+    def project_homogeneous_control_points(homogeneous_points: np.ndarray) -> (np.ndarray, np.ndarray):
+        """
+        Projects the homogeneous coordinates onto the :math:`w=1` hyperplane.
+
+        Returns
+        -------
+        numpy.ndarray, numpy.ndarray
+            The projected coordinates in three-dimensional space followed by the weight array
+        """
+        P = homogeneous_points[:, :, :3] / np.repeat(homogeneous_points[:, :, np.newaxis], 3, axis=2),
+        w = homogeneous_points[:, :, -1]
+        return P, w
+
+    def elevate_degree_u(self) -> "RationalBezierSurface":
+        """
+        Elevates the degree of the rational Bézier surface in the :math:`u`-parametric direction.
+
+        Returns
+        -------
+        RationalBezierSurface
+            A new rational Bézier surface with identical shape to the current one but with one additional row of
+            control points in the :math:`u`-parametric direction
+        """
+        n = self.degree_u
+        m = self.degree_v
+        Pw = self.get_homogeneous_control_points()
+
+        # New array has one additional control point (current array only has n+1 control points)
+        new_Pw = np.zeros((Pw.shape[0] + 1, Pw.shape[1], Pw.shape[2]))
+
+        # Set starting and ending control points to what they already were
+        new_Pw[0, :, :] = Pw[0, :, :]
+        new_Pw[-1, :, :] = Pw[-1, :, :]
+
+        # Update all the other control points
+        for i in range(1, n + 1):  # 1 <= i <= n
+            for j in range(0, m + 1):  # for all j
+                new_Pw[i, j, :] = i / (n + 1) * Pw[i - 1, j, :] + (1 - i / (n + 1)) * Pw[i, j, :]
+
+        # Extract projected control points and weights from array
+        new_P, new_w = self.project_homogeneous_control_points(new_Pw)
+
+        return RationalBezierSurface.generate_from_array(new_P, new_w)
+
+    def elevate_degree_v(self) -> "RationalBezierSurface":
+        """
+        Elevates the degree of the rational Bézier surface in the :math:`v`-parametric direction.
+
+        Returns
+        -------
+        RationalBezierSurface
+            A new rational Bézier surface with identical shape to the current one but with one additional row of
+            control points in the :math:`v`-parametric direction
+        """
+        n = self.degree_u
+        m = self.degree_v
+        Pw = self.get_homogeneous_control_points()
+
+        # New array has one additional control point (current array only has n+1 control points)
+        new_Pw = np.zeros((Pw.shape[0], Pw.shape[1] + 1, Pw.shape[2]))
+
+        # Set starting and ending control points to what they already were
+        new_Pw[:, 0, :] = Pw[:, 0, :]
+        new_Pw[:, -1, :] = Pw[:, -1, :]
+
+        # Update all the other control points
+        for i in range(0, n + 1):  # for all i
+            for j in range(1, m + 1):  # 1 <= j <= m
+                new_Pw[i, j, :] = j / (m + 1) * Pw[i, j - 1, :] + (1 - j / (m + 1)) * Pw[i, j, :]
+
+        # Extract projected control points and weights from array
+        new_P, new_w = self.project_homogeneous_control_points(new_Pw)
+
+        return RationalBezierSurface.generate_from_array(new_P, new_w)
 
     @classmethod
     def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
@@ -1667,7 +1757,7 @@ class RationalBezierSurface(Surface):
         """
         Splits the rational Bezier surface at :math:`u=u_0` along the :math:`v`-parametric direction.
         """
-        Pw = self.get_xyzw_array()
+        Pw = self.get_homogeneous_control_points()
 
         def de_casteljau(i: int, j: int, k: int) -> np.ndarray:
             """
@@ -1703,22 +1793,19 @@ class RationalBezierSurface(Surface):
         transposed_Pw_1 = np.transpose(bez_surf_split_1_Pw, (1, 0, 2))
         transposed_Pw_2 = np.transpose(bez_surf_split_2_Pw, (1, 0, 2))
 
+        P1, w1 = self.project_homogeneous_control_points(transposed_Pw_1)
+        P2, w2 = self.project_homogeneous_control_points(transposed_Pw_2)
+
         return (
-            RationalBezierSurface.generate_from_array(
-                transposed_Pw_1[:, :, :3] / np.repeat(transposed_Pw_1[:, :, -1][:, :, np.newaxis], 3, axis=2),
-                transposed_Pw_1[:, :, -1]
-            ),
-            RationalBezierSurface.generate_from_array(
-                transposed_Pw_2[:, :, :3] / np.repeat(transposed_Pw_2[:, :, -1][:, :, np.newaxis], 3, axis=2),
-                transposed_Pw_2[:, :, -1]
-            )
+            RationalBezierSurface.generate_from_array(P1, w1),
+            RationalBezierSurface.generate_from_array(P2, w2)
         )
 
     def split_at_v(self, v0: float) -> ("BezierSurface", "BezierSurface"):
         """
         Splits the rational Bezier surface at :math:`v=v_0` along the :math:`u`-parametric direction.
         """
-        Pw = self.get_xyzw_array()
+        Pw = self.get_homogeneous_control_points()
 
         def de_casteljau(i: int, j: int, k: int) -> np.ndarray:
             """
@@ -1751,15 +1838,12 @@ class RationalBezierSurface(Surface):
             [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
         ])
 
+        P1, w1 = self.project_homogeneous_control_points(bez_surf_split_1_Pw)
+        P2, w2 = self.project_homogeneous_control_points(bez_surf_split_2_Pw)
+
         return (
-            RationalBezierSurface.generate_from_array(
-                bez_surf_split_1_Pw[:, :, :3] / np.repeat(bez_surf_split_1_Pw[:, :, np.newaxis], 3, axis=2),
-                bez_surf_split_1_Pw[:, :, -1]
-            ),
-            RationalBezierSurface.generate_from_array(
-                bez_surf_split_2_Pw[:, :, :3] / np.repeat(bez_surf_split_2_Pw[:, :, np.newaxis], 3, axis=2),
-                bez_surf_split_2_Pw[:, :, -1]
-            )
+            RationalBezierSurface.generate_from_array(P1, w1),
+            RationalBezierSurface.generate_from_array(P2, w2)
         )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
