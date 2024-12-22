@@ -1722,6 +1722,45 @@ class RationalBezierSurface(Surface):
                                x: float = None, y: float = None, z: float = None):
         """
         Computes one parametric value given the other and a specified :math:`x`-, :math:`y`-, or :math:`z`-location.
+        As an example, given a :obj:`~aerocaps.geom.surfaces.RationalBezierSurface` object
+        assigned to the variable ``surf``,
+        the :math:`u`-parameter corresponding to :math:`y=1.4` along the :math:`v=0.8` isoparametric curve can be
+        computed using
+
+        .. code-block:: python
+
+            u = surf.get_u_or_v_given_uvxyz(v=0.8, y=1.4)
+
+        Note that the inputs are keyword arguments to avoid having to specify ``None`` for each of the arguments
+        not used.
+
+        Parameters
+        ----------
+        u: float or None
+            Value of :math:`u` to solve for or specify. If left as ``None``, this parameter will be solved for.
+            If ``None``, :math:`v` must be specified. Default: ``None``
+        v: float or None
+            Value of :math:`v` to solve for or specify. If left as ``None``, this parameter will be solved for.
+            If ``None``, :math:`u` must be specified. Default: ``None``
+        uv_guess: float
+            Starting guess for the unsolved :math:`u` or :math:`v` parameter. Default: ``0.5``
+        x: float or None
+            :math:`x`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
+            outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
+            either :math:`y` or :math:`z` must be specified. Default: ``None``
+        y: float or None
+            :math:`y`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
+            outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
+            either :math:`x` or :math:`z` must be specified. Default: ``None``
+        z: float or None
+            :math:`z`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
+            outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
+            either :math:`x` or :math:`y` must be specified. Default: ``None``
+
+        Returns
+        -------
+        float
+            The value of :math:`u` if :math:`v` is specified or :math:`v` if :math:`u` is specified
         """
         # Validate inputs
         if u is None and v is None or (u is not None and v is not None):
