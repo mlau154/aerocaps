@@ -704,7 +704,7 @@ class BezierSurface(Surface):
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
 
     def get_u_or_v_given_uvxyz(self, u: float = None, v: float = None, uv_guess: float = 0.5,
-                               x: float = None, y: float = None, z: float = None) -> float:
+                               x: Length = None, y: Length = None, z: Length = None) -> float:
         """
         Computes one parametric value given the other and a specified :math:`x`-, :math:`y`-, or :math:`z`-location.
         As an example, given a :obj:`~aerocaps.geom.surfaces.BezierSurface` object assigned to the variable ``surf``,
@@ -728,15 +728,15 @@ class BezierSurface(Surface):
             If ``None``, :math:`u` must be specified. Default: ``None``
         uv_guess: float
             Starting guess for the unsolved :math:`u` or :math:`v` parameter. Default: ``0.5``
-        x: float or None
+        x: Length or None
             :math:`x`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
             outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
             either :math:`y` or :math:`z` must be specified. Default: ``None``
-        y: float or None
+        y: Length or None
             :math:`y`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
             outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
             either :math:`x` or :math:`z` must be specified. Default: ``None``
-        z: float or None
+        z: Length or None
             :math:`z`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
             outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
             either :math:`x` or :math:`y` must be specified. Default: ``None``
@@ -754,11 +754,11 @@ class BezierSurface(Surface):
             raise ValueError("Must specify exactly one of x, y, or z")
 
         if x is not None:
-            xyz, xyz_val = "x", x
+            xyz, xyz_val = "x", x.m
         elif y is not None:
-            xyz, xyz_val = "y", y
+            xyz, xyz_val = "y", y.m
         elif z is not None:
-            xyz, xyz_val = "z", z
+            xyz, xyz_val = "z", z.m
         else:
             raise ValueError("Did not detect an x, y, or z input")
 
@@ -1719,7 +1719,7 @@ class RationalBezierSurface(Surface):
                 assert np.all(np.isclose(dxdydz_ratio, current_f))
 
     def get_u_or_v_given_uvxyz(self, u: float = None, v: float = None, uv_guess: float = 0.5,
-                               x: float = None, y: float = None, z: float = None):
+                               x: Length = None, y: Length = None, z: Length = None):
         """
         Computes one parametric value given the other and a specified :math:`x`-, :math:`y`-, or :math:`z`-location.
         As an example, given a :obj:`~aerocaps.geom.surfaces.RationalBezierSurface` object
@@ -1744,15 +1744,15 @@ class RationalBezierSurface(Surface):
             If ``None``, :math:`u` must be specified. Default: ``None``
         uv_guess: float
             Starting guess for the unsolved :math:`u` or :math:`v` parameter. Default: ``0.5``
-        x: float or None
+        x: Length or None
             :math:`x`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
             outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
             either :math:`y` or :math:`z` must be specified. Default: ``None``
-        y: float or None
+        y: Length or None
             :math:`y`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
             outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
             either :math:`x` or :math:`z` must be specified. Default: ``None``
-        z: float or None
+        z: Length or None
             :math:`z`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
             outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
             either :math:`x` or :math:`y` must be specified. Default: ``None``
@@ -1770,11 +1770,11 @@ class RationalBezierSurface(Surface):
             raise ValueError("Must specify exactly one of x, y, or z")
 
         if x is not None:
-            xyz, xyz_val = "x", x
+            xyz, xyz_val = "x", x.m
         elif y is not None:
-            xyz, xyz_val = "y", y
+            xyz, xyz_val = "y", y.m
         elif z is not None:
-            xyz, xyz_val = "z", z
+            xyz, xyz_val = "z", z.m
         else:
             raise ValueError("Did not detect an x, y, or z input")
 
