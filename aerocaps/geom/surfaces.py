@@ -993,7 +993,7 @@ class RationalBezierSurface(Surface):
         numpy.ndarray, numpy.ndarray
             The projected coordinates in three-dimensional space followed by the weight array
         """
-        P = homogeneous_points[:, :, :3] / np.repeat(homogeneous_points[:, :, np.newaxis], 3, axis=2),
+        P = homogeneous_points[:, :, :3] / np.repeat(homogeneous_points[:, :, -1][:, :, np.newaxis], 3, axis=2)
         w = homogeneous_points[:, :, -1]
         return P, w
 
