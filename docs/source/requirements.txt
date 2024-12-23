@@ -1,0 +1,8 @@
+pydata-sphinx-theme
+sphinx-design
+scipy
+numpy
+matplotlib
+pyvista
+pyiges
+shapely

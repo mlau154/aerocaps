@@ -1,0 +1,18 @@
+html[data-theme="dark"] {
+    --bs-body-bg: 33,37,41;
+}
+
+table.no-border-table td {
+    border: none;
+}
+
+table.max-width-table {
+    width: 500px;
+    max-width: 100%;
+}
+
+/* Prevent Sphinx from converting transparent backgrounds to white in dark mode */
+html[data-theme="dark"] .bd-content img:not(.only-dark,.only-light) {
+    background-color: var(--bs-body-bg);
+    border-radius: 0.25rem;
+}
