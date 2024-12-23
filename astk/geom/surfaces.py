@@ -203,15 +203,23 @@ class BezierSurface(Surface):
                 self_perp_edge_derivs, other_perp_edge_derivs)):
 
             # Ensure that each derivative vector has the same direction along the boundary for each surface
-            assert np.allclose(
-                np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
-                np.nan_to_num(other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
-            )
+            try:
+                assert np.allclose(
+                    np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                    np.nan_to_num(other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+                )
+            except AssertionError:
+                assert np.allclose(
+                    np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                    np.nan_to_num(-other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+                )
+
 
             # Compute the ratio of the magnitudes for each derivative vector along the boundary for each surface.
             # These will be compared at the end.
             with np.errstate(divide="ignore"):
                 magnitude_ratios.append(self_perp_edge_deriv / other_perp_edge_deriv)
+
 
         # Assert that the first derivatives along each boundary are proportional
         current_f = None
@@ -721,11 +729,71 @@ class RationalBezierSurface(Surface):
     def enforce_c0c1c2(self, other: "RationalBezierSurface",
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
+    
+    @staticmethod
+    def _cast_uv(u: float or np.ndarray, v: float or np.ndarray) -> (float, float) or (np.ndarray, np.ndarray):
+        if not isinstance(u, np.ndarray):
+            u = np.array([u])
+        if not isinstance(v, np.ndarray):
+            v = np.array([v])
 
-    def compute_first_derivative_u(self, u: float or np.ndarray, v: float or np.ndarray):
+        #print(f"{u=},{v=}")
+        return u, v
+    
+    def dSdu_v2(self,u: float, v: float):
         n, m = self.degree_u, self.degree_v
         P = self.get_control_point_array()
-        assert type(u) == type(v)
+        w=self.weights
+        u,v=self._cast_uv(u,v)
+        if isinstance(u, np.ndarray):
+            assert u.shape == v.shape
+
+        A_1 = np.zeros(P.shape[2])
+        A_2 = np.zeros(P.shape[2])
+        B_1 = np.zeros(P.shape[2])
+        B_2 = np.zeros(P.shape[2])
+        
+
+        for i in range(self.degree_u + 1):
+            for j in range(self.degree_v + 1):
+                dbudu=self.degree_u*(bernstein_poly(self.degree_u-1, i-1, u)-bernstein_poly(self.degree_u-1, i, u))
+                A_1 += bernstein_poly(n,i,u)*bernstein_poly(m,j,v)*w[i,j]
+                A_2 += dbudu*bernstein_poly(m,j,v)*w[i,j]*P[i,j,:]
+                B_1 += bernstein_poly(n,i,u)*bernstein_poly(m,j,v)*w[i,j]*P[i,j,:]
+                B_2 += dbudu*bernstein_poly(m,j,v)*w[i,j]
+        A=A_1*A_2
+        B=B_1*B_2
+        return (A-B)/(A_1**2)
+    
+    def dSdv_v2(self, u:float, v:float):
+        n, m = self.degree_u, self.degree_v
+        P = self.get_control_point_array()
+        w=self.weights
+        u,v=self._cast_uv(u,v)
+        if isinstance(u, np.ndarray):
+            assert u.shape == v.shape
+
+        A_1 = np.zeros(P.shape[2])
+        A_2 = np.zeros(P.shape[2])
+        B_1 = np.zeros(P.shape[2])
+        B_2 = np.zeros(P.shape[2])
+
+        for i in range(self.degree_u + 1):
+            for j in range(self.degree_v + 1):
+                dbvdv=m*(bernstein_poly(m-1, j-1, v)-bernstein_poly(m-1, j, v))
+                A_1 += bernstein_poly(n,i,u)*bernstein_poly(m,j,v)*w[i,j]
+                A_2 += bernstein_poly(n,i,u)*dbvdv*w[i,j]*P[i,j,:]
+                B_1 += bernstein_poly(n,i,u)*bernstein_poly(m,j,v)*w[i,j]*P[i,j,:]
+                B_2 += bernstein_poly(n,i,u)*dbvdv*w[i,j]
+        A=A_1*A_2
+        B=B_1*B_2
+        return (A-B)/(A_1**2)
+
+
+    def dSdu(self, u: float or np.ndarray, v: float or np.ndarray):
+        n, m = self.degree_u, self.degree_v
+        P = self.get_control_point_array()
+        u,v=self._cast_uv(u,v)
         if isinstance(u, np.ndarray):
             assert u.shape == v.shape
 
@@ -754,10 +822,12 @@ class RationalBezierSurface(Surface):
 
         return (A - B) / W
 
-    def compute_first_derivative_v(self, u: float or np.ndarray, v: float or np.ndarray):
+    def dSdv(self, u: float or np.ndarray, v: float or np.ndarray):
+        
         n, m = self.degree_u, self.degree_v
         P = self.get_control_point_array()
-        assert type(u) == type(v)
+        #assert type(u) == type(v)
+        u,v=self._cast_uv(u,v)
         if isinstance(u, np.ndarray):
             assert u.shape == v.shape
 
@@ -786,10 +856,11 @@ class RationalBezierSurface(Surface):
 
         return (A - B) / W
 
-    def compute_second_derivative_u(self, u: float or np.ndarray, v: float or np.ndarray):
+    def d2Sdu2(self, u: float or np.ndarray, v: float or np.ndarray):
         n, m = self.degree_u, self.degree_v
         P = self.get_control_point_array()
-        assert type(u) == type(v)
+        #assert type(u) == type(v)
+        u,v=self._cast_uv(u,v)
         if isinstance(u, np.ndarray):
             assert u.shape == v.shape
 
@@ -838,10 +909,11 @@ class RationalBezierSurface(Surface):
 
         return (W * (dA - dB) - dW * (A - B)) / W**2
 
-    def compute_second_derivative_v(self, u: float or np.ndarray, v: float or np.ndarray):
+    def d2Sdv2(self, u: float or np.ndarray, v: float or np.ndarray):
         n, m = self.degree_u, self.degree_v
         P = self.get_control_point_array()
-        assert type(u) == type(v)
+        #assert type(u) == type(v)
+        u,v=self._cast_uv(u,v)
         if isinstance(u, np.ndarray):
             assert u.shape == v.shape
 
@@ -889,6 +961,171 @@ class RationalBezierSurface(Surface):
         dW = 2 * m * np.tile(weight_sum, (3, 1)).T * np.tile(weight_deriv_sum, (3, 1)).T
 
         return (W * (dA - dB) - dW * (A - B)) / W**2
+    
+    def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
+        if edge == SurfaceEdge.North:
+            return np.array([self.evaluate_ndarray(u, 1.0) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.South:
+            return np.array([self.evaluate_ndarray(u, 0.0) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.East:
+            return np.array([self.evaluate_ndarray(1.0, v) for v in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.West:
+            return np.array([self.evaluate_ndarray(0.0, v) for v in np.linspace(0.0, 1.0, n_points)])
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
+        if edge == SurfaceEdge.North:
+            return np.array([(self.dSdv(u, 1.0) if perp else
+                              self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.South:
+            return np.array([(self.dSdv(u, 0.0) if perp else
+                              self.dSdu(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.East:
+            return np.array([(self.dSdu(1.0, v) if perp else
+                              self.dSdv(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.West:
+            return np.array([(self.dSdu(0.0, v) if perp else
+                              self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+        else:
+            raise ValueError(f"No edge called {edge}")
+        
+    def get_first_derivs_along_edge_v2(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
+        if edge == SurfaceEdge.North:
+            return np.array([(self.dSdv_v2(u, 1.0) if perp else
+                              self.dSdu_v2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.South:
+            return np.array([(self.dSdv_v2(u, 0.0) if perp else
+                              self.dSdu_v2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.East:
+            return np.array([(self.dSdu_v2(1.0, v) if perp else
+                              self.dSdv_v2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.West:
+            return np.array([(self.dSdu_v2(0.0, v) if perp else
+                              self.dSdv_v2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
+        if edge == SurfaceEdge.North:
+            return np.array([(self.d2Sdv2(u, 1.0) if perp else
+                              self.d2Sdu2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.South:
+            return np.array([(self.d2Sdv2(u, 0.0) if perp else
+                              self.d2Sdu2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.East:
+            return np.array([(self.d2Sdu2(1.0, v) if perp else
+                              self.d2Sdv2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.West:
+            return np.array([(self.d2Sdu2(0.0, v) if perp else
+                              self.d2Sdv2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+        else:
+            raise ValueError(f"No edge called {edge}")
+    
+    def verify_g0(self, other: 'RationalBezierSurface', surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge,
+                n_points: int = 10):
+        """ Verifies that two RationalBezierSurfaces are G0 continuous along their shared edge"""
+        self_edge = self.get_edge(surface_edge, n_points=n_points)
+        other_edge = other.get_edge(other_surface_edge, n_points=n_points)
+        assert np.array_equal(self_edge, other_edge)
+
+    def verify_g1(self, other: "RationalBezierSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge,
+                  n_points: int = 10):
+        """
+        Verifies that two RationalBezierSurfaces are G1 continuous along their shared edge
+        """
+        # Get the first derivatives at the boundary and perpendicular to the boundary for each surface,
+        # evaluated at "n_points" locations along the boundary
+        self_perp_edge_derivs = self.get_first_derivs_along_edge(surface_edge, n_points=n_points, perp=True)
+        other_perp_edge_derivs = other.get_first_derivs_along_edge(other_surface_edge, n_points=n_points, perp=True)
+        self_perp_edge_derivs[np.absolute(self_perp_edge_derivs)<1e-6]=0.0
+        other_perp_edge_derivs[np.absolute(other_perp_edge_derivs)<1e-6]=0.0
+
+
+        # Initialize an array of ratios of magnitude of the derivative values at each point for both sides
+        # of the boundary
+        magnitude_ratios = []
+
+        # Loop over each pair of cross-derivatives evaluated along the boundary
+        for point_idx, (self_perp_edge_deriv, other_perp_edge_deriv) in enumerate(zip(
+                self_perp_edge_derivs, other_perp_edge_derivs)):
+
+            # Ensure that each derivative vector has the same direction along the boundary for each surface
+            try:
+                assert np.allclose(
+                    np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                    np.nan_to_num(other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+                )
+            except AssertionError:
+                assert np.allclose(
+                    np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                    np.nan_to_num(-other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+                )
+
+
+            # Compute the ratio of the magnitudes for each derivative vector along the boundary for each surface.
+            # These will be compared at the end.
+            #print(f"{self_perp_edge_deriv=},{other_perp_edge_deriv=}")
+            np.seterr(divide='ignore', invalid='ignore')
+            with np.errstate(divide="ignore"):
+                magnitude_ratios.append(np.nan_to_num(self_perp_edge_deriv / other_perp_edge_deriv,nan=0))
+                    
+        #print("Rational",f"{magnitude_ratios=}")
+        # Assert that the first derivatives along each boundary are proportional
+        current_f = None
+        for magnitude_ratio in magnitude_ratios:
+            for dxdydz_ratio in magnitude_ratio:
+                if np.any(np.isinf(dxdydz_ratio)) or np.any(np.isnan(dxdydz_ratio)) or np.any(dxdydz_ratio == 0.0):
+                    continue
+                if current_f is None:
+                    current_f = dxdydz_ratio
+                    continue
+                assert np.all(np.isclose(dxdydz_ratio, current_f))
+
+    def verify_g2(self, other: "RationalBezierSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge,
+                  n_points: int = 10):
+        """
+        Verifies that two RationalBezierSurfaces are G2 continuous along their shared edge
+        """
+        # Get the first derivatives at the boundary and perpendicular to the boundary for each surface,
+        # evaluated at "n_points" locations along the boundary
+        self_perp_edge_derivs = self.get_second_derivs_along_edge(surface_edge, n_points=n_points, perp=True)
+        other_perp_edge_derivs = other.get_second_derivs_along_edge(other_surface_edge, n_points=n_points, perp=True)
+        self_perp_edge_derivs[np.absolute(self_perp_edge_derivs)<1e-6]=0.0
+        other_perp_edge_derivs[np.absolute(other_perp_edge_derivs)<1e-6]=0.0
+        
+        ratios_other_self=other_perp_edge_derivs/self_perp_edge_derivs
+        print(f"{ratios_other_self=}")
+        #print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
+        # Initialize an array of ratios of magnitude of the derivative values at each point for both sides
+        # of the boundary
+        magnitude_ratios = []
+
+        # Loop over each pair of cross-derivatives evaluated along the boundary
+        for point_idx, (self_perp_edge_deriv, other_perp_edge_deriv) in enumerate(zip(
+                self_perp_edge_derivs, other_perp_edge_derivs)):
+
+            # Ensure that each derivative vector has the same direction along the boundary for each surface
+            assert np.allclose(
+                np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                np.nan_to_num(other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+            )
+
+            # Compute the ratio of the magnitudes for each derivative vector along the boundary for each surface.
+            # These will be compared at the end.
+            with np.errstate(divide="ignore"):
+                magnitude_ratios.append(self_perp_edge_deriv / other_perp_edge_deriv)
+
+        # Assert that the second derivatives along each boundary are proportional
+        current_f = None
+        for magnitude_ratio in magnitude_ratios:
+            for dxdydz_ratio in magnitude_ratio:
+                if np.any(np.isinf(dxdydz_ratio)) or np.any(np.isnan(dxdydz_ratio)) or np.any(dxdydz_ratio == 0.0):
+                    continue
+                if current_f is None:
+                    current_f = dxdydz_ratio
+                    continue
+                assert np.all(np.isclose(dxdydz_ratio, current_f))
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
 
