@@ -641,6 +641,9 @@ class Bezier3D(PCurve3D):
     def reverse(self) -> "Bezier3D":
         return self.__class__(self.control_points[::-1])
 
+    def to_rational_bezier_curve(self) -> "RationalBezierCurve3D":
+        return RationalBezierCurve3D(self.control_points, np.ones(self.degree + 1))
+
     def projection_on_principal_plane(self, plane: str = "XY") -> Bezier2D:
         return Bezier2D(control_points=[pt.projection_on_principal_plane(plane) for pt in self.control_points])
 
