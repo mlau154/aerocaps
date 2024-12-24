@@ -1124,6 +1124,148 @@ class RationalBezierSurface(Surface):
 
         return cls(control_points, weights)
 
+    @staticmethod
+    def fill_surface_from_four_boundaries(left_curve: Bezier3D or RationalBezierCurve3D,
+                                          right_curve: Bezier3D or RationalBezierCurve3D,
+                                          top_curve: Bezier3D or RationalBezierCurve3D,
+                                          bottom_curve: Bezier3D or RationalBezierCurve3D) -> "RationalBezierSurface":
+        """
+        Creates a fill surface from four boundary curves.
+
+        .. warning::
+
+            While this method works for non-planar sets of boundary curves, the primary intended use is for
+            co-planar boundary curves. Undesirable surface shapes may result if using non-planar curves.
+
+        Parameters
+        ----------
+        left_curve: Bezier3D or RationalBezierCurve3D
+            Left boundary curve
+        right_curve: Bezier3D or RationalBezierCurve3D
+            Right boundary curve
+        top_curve: Bezier3D or RationalBezierCurve3D
+            Top boundary curve
+        bottom_curve: Bezier3D or RationalBezierCurve3D
+            Bottom boundary curve
+
+        Returns
+        -------
+        RationalBezierSurface
+            Fill surface
+        """
+        # Convert the boundary curves to rational Bézier curves if they are non-rational
+        if isinstance(left_curve, Bezier3D):
+            left_curve = left_curve.to_rational_bezier_curve()
+        if isinstance(right_curve, Bezier3D):
+            right_curve = right_curve.to_rational_bezier_curve()
+        if isinstance(top_curve, Bezier3D):
+            top_curve = top_curve.to_rational_bezier_curve()
+        if isinstance(bottom_curve, Bezier3D):
+            bottom_curve = bottom_curve.to_rational_bezier_curve()
+
+        # Ensure the the boundary curve loop is closed
+        left_cps = left_curve.get_homogeneous_control_points()
+        right_cps = right_curve.get_homogeneous_control_points()
+        top_cps = top_curve.get_homogeneous_control_points()
+        bottom_cps = bottom_curve.get_homogeneous_control_points()
+        corners = np.array([
+            left_cps[0],
+            left_cps[-1],
+            right_cps[0],
+            right_cps[-1],
+            top_cps[0],
+            top_cps[-1],
+            bottom_cps[0],
+            bottom_cps[-1]
+        ])
+        unique_corners = np.unique(corners, axis=0)
+        if len(unique_corners) > 4:
+            raise ValueError("Boundary curve loop is not closed")
+
+        # Re-orient the curves if necessary
+        if not (
+            all(np.isclose(left_cps[-1], top_cps[0])) or
+            all(np.isclose(left_cps[0], top_cps[0]))
+        ):
+            top_curve = top_curve.reverse()
+            if not (
+                all(np.isclose(left_cps[-1], top_cps[-1])) or
+                all(np.isclose(left_cps[0], top_cps[-1]))
+            ):
+                raise ValueError("Top curve and left curve are not connected")
+        else:
+            if not (
+                all(np.isclose(right_cps[-1], top_cps[-1])) or
+                all(np.isclose(right_cps[0], top_cps[-1])) or
+                all(np.isclose(right_cps[-1], top_cps[0])) or
+                all(np.isclose(right_cps[0], top_cps[0]))
+            ):
+                raise ValueError("Top curve and right curve are not connected")
+        if not (
+            all(np.isclose(left_cps[-1], bottom_cps[0])) or
+            all(np.isclose(left_cps[0], bottom_cps[0]))
+        ):
+            bottom_curve = bottom_curve.reverse()
+            if not (
+                all(np.isclose(left_cps[-1], bottom_cps[-1])) or
+                all(np.isclose(left_cps[0], bottom_cps[-1]))
+            ):
+                raise ValueError("Bottom curve and left curve are not connected")
+        else:
+            if not (
+                all(np.isclose(right_cps[-1], bottom_cps[-1])) or
+                all(np.isclose(right_cps[0], bottom_cps[-1])) or
+                all(np.isclose(right_cps[-1], bottom_cps[0])) or
+                all(np.isclose(right_cps[0], bottom_cps[0]))
+            ):
+                raise ValueError("Bottom curve and right curve are not connected")
+
+        # Elevate the curve degrees of the curve pairs so that they match internally
+        if left_curve.degree != right_curve.degree:
+            if left_curve.degree < right_curve.degree:
+                while left_curve.degree < right_curve.degree:
+                    left_curve = left_curve.elevate_degree()
+            else:
+                while right_curve.degree < left_curve.degree:
+                    right_curve = right_curve.elevate_degree()
+        if top_curve.degree != bottom_curve.degree:
+            if top_curve.degree < bottom_curve.degree:
+                while top_curve.degree < bottom_curve.degree:
+                    top_curve = top_curve.elevate_degree()
+            else:
+                while bottom_curve.degree < top_curve.degree:
+                    bottom_curve = bottom_curve.elevate_degree()
+
+        # Retrieve the new homogeneous control points for each (possibly modified) curve
+        left_cps = left_curve.get_homogeneous_control_points()
+        right_cps = right_curve.get_homogeneous_control_points()
+        top_cps = top_curve.get_homogeneous_control_points()
+        bottom_cps = bottom_curve.get_homogeneous_control_points()
+
+        # Linearly interpolate between the left and right curves, length equal to number of control points
+        # in the top/bottom direction
+        arrays_to_stack = []
+        for t in np.linspace(0.0, 1.0, top_curve.degree + 1):
+            arrays_to_stack.append(left_cps + t * (right_cps - left_cps))
+        Pw = np.array(arrays_to_stack)
+
+        # Displace the control points associated with the top side of the surface
+        for Pw_slice, curve_Pw in zip(Pw[1:-1], top_cps[1:-1]):
+            displacement = curve_Pw - Pw_slice[0]
+            for i in range(left_curve.degree):
+                Pw_slice[i] += (left_curve.degree - i) / left_curve.degree * displacement
+
+        # Displace the control points associated with the bottom side of the surface
+        for Pw_slice, curve_Pw in zip(Pw[1:-1], bottom_cps[1:-1]):
+            displacement = curve_Pw - Pw_slice[-1]
+            for i in range(left_curve.degree):
+                Pw_slice[-1 - i] += (left_curve.degree - i) / left_curve.degree * displacement
+
+        # Project the new homogeneous control points onto the w=1 hyperplane
+        new_points, new_weights = RationalBezierSurface.project_homogeneous_control_points(Pw)
+
+        return RationalBezierSurface.generate_from_array(new_points, new_weights)
+
     def evaluate_ndarray(self, u: float, v: float):
         P = self.get_control_point_array()
 
