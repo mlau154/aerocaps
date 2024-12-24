@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import pyvista as pv
+import copy
 
 print(os.getcwd())
 
@@ -198,35 +199,43 @@ def test_Rational_Bezier_Surface_1():
     """
     rng = np.random.default_rng(seed=42)
     negative_counter=0
-    for it in range(50):
-        n=rng.integers(4, 9)
+    for it in range(15):
+        n=rng.integers(4, 6)
         m=n
         #rng = np.random.default_rng(seed=42)
 
-        # cp_1 = np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1]],
-        #                  [[0,1,1],[1,1,0],[2,1,1],[3,1,1]],
-        #                  [[0,2,0],[1,2,1],[2,2,0],[3,2,1]],
-        #                  [[0,3,0],[1,3,1],[2,3,1],[3,3,1]]],dtype=np.float64)  
+        cp_1 = np.array([[[0,0,rng.random()],[1,0,rng.random()],[2,0,rng.random()],[3,0,rng.random()]],
+                         [[0,1,rng.random()],[1,1,rng.random()],[2,1,rng.random()],[3,1,rng.random()]],
+                         [[0,2,rng.random()],[1,2,rng.random()],[2,2,rng.random()],[3,2,rng.random()]],
+                         [[0,3,rng.random()],[1,3,rng.random()],[2,3,rng.random()],[3,3,rng.random()]]],dtype=np.float64)  
 
-        cp_1 =rng.random(( n+1, m+1, 3))
+        #cp_1 =rng.random(( n+1, m+1, 3))
                  
-        # cp_2 =  np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1]],
-        #                  [[0,1,2],[1,1,1],[2,1,1],[3,1,1]],
-        #                  [[0,2,0],[1,2,0],[2,2,1],[3,2,1]],
-        #                  [[0,3,0],[1,3,1],[2,3,1],[3,3,1]]],dtype=np.float64)            
-        cp_2 =rng.random(( n+1, m+1, 3))
-        w_1 = rng.uniform(0.4, 0.5, (n+1, m+1))
-        w_2 = rng.uniform(0.9, 1.2, (n+1, m+1))
+        cp_2 =  np.array([[[0,0,rng.random()],[1,0,rng.random()],[2,0,rng.random()],[3,0,rng.random()]],
+                         [[0,1,rng.random()],[1,1,rng.random()],[2,1,rng.random()],[3,1,rng.random()]],
+                         [[0,2,rng.random()],[1,2,rng.random()],[2,2,rng.random()],[3,2,rng.random()]],
+                         [[0,3,rng.random()],[1,3,rng.random()],[2,3,rng.random()],[3,3,rng.random()]]],dtype=np.float64)            
+        cp_2[:, :, 0] += 3
+        #cp_2 =rng.random(( n+1, m+1, 3))
+        w_1 = rng.uniform(0.8, 1.2, (np.shape(cp_1)[0], np.shape(cp_1)[1]))
+        w_2 = rng.uniform(0.8, 1.2, (np.shape(cp_1)[0], np.shape(cp_1)[1]))
 
-        for i in range(1):
-            for j in range(1):
+        Rat_bez_surf_1 = RationalBezierSurface(cp_1,w_1)
+        Rat_bez_surf_2 = RationalBezierSurface(cp_2,w_2)
+
+        Rat_bez_surf_1_org=copy.deepcopy(Rat_bez_surf_1)
+        Rat_bez_surf_2_org=copy.deepcopy(Rat_bez_surf_2)
+
+        for i in range(4):
+            for j in range(4):
                 side_self=SurfaceEdge(i)
                 side_other=SurfaceEdge(j)
 
                 # Loop through each pair of control point meshes
+                Rat_bez_surf_1=copy.deepcopy(Rat_bez_surf_1_org)
+                Rat_bez_surf_2=copy.deepcopy(Rat_bez_surf_2_org)
+
                 
-                Rat_bez_surf_1 = RationalBezierSurface(cp_1,w_1)
-                Rat_bez_surf_2 = RationalBezierSurface(cp_2,w_2)
                 
                 try:
                     Rat_bez_surf_1.enforce_g0g1g2(Rat_bez_surf_2, 1.0, side_self, side_other)
@@ -244,12 +253,33 @@ def test_Rational_Bezier_Surface_1():
                     Rat_bez_surf_1.verify_g2(Rat_bez_surf_2, side_self, side_other)
                 except NegativeWeightError:
                     negative_counter+=1
+
+                    # plot= pv.Plotter()
+                    # Rat_bez_surf_1_org.plot_surface(plot)
+                    # Rat_bez_surf_1_org.plot_control_point_mesh_lines(plot)
+                    # Rat_bez_surf_1_org.plot_control_points(plot)
+                    # Rat_bez_surf_2_org.plot_surface(plot)
+                    # Rat_bez_surf_2_org.plot_control_point_mesh_lines(plot)
+                    # Rat_bez_surf_2_org.plot_control_points(plot)
+                    # plot.set_background('black')
+                    # plot.show()
+
+                    # plot= pv.Plotter()
+                    # Rat_bez_surf_1.plot_surface(plot)
+                    # Rat_bez_surf_1.plot_control_point_mesh_lines(plot)
+                    # Rat_bez_surf_1.plot_control_points(plot)
+                    # Rat_bez_surf_2.plot_surface(plot)
+                    # Rat_bez_surf_2.plot_control_point_mesh_lines(plot)
+                    # Rat_bez_surf_2.plot_control_points(plot)
+                    # plot.set_background('black')
+                    # plot.show()
+
                     #print(f'{it=},{negative_counter=}')
 
                     
 
                 #except NegativeWeightError:
-                #print(f"{negative_counter=}")
+    print(f"{negative_counter=}")
                 #negative_counter+=1
                 #continue
                 # Enforce G0, G1, and G2 continuity
@@ -268,9 +298,10 @@ def test_Rational_Bezier_Surface_2():
     rng = np.random.default_rng(seed=42)
     Assertion_error_counter=0
     Negative_error_counter=0
-    for n in range(20):
+    num_enforced=0
+    for n in range(40):
 
-        random_array = rng.integers(low=3, high=5, size=3)
+        random_array = rng.integers(low=4, high=6, size=3)
 
         #Pick the control points randomly from the 3 element array. 
         n1 = random_array[rng.integers(0, len(random_array) )]
@@ -290,22 +321,61 @@ def test_Rational_Bezier_Surface_2():
         
         
 
-        cp_1 = rng.random(( n1+1, m1+1, 3))
+        #cp_1 = rng.random(( n1+1, m1+1, 3))
+        #cp_1 = rng.random(( 4, 5, 3))
 
         # cp_1 = np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1]],
         #                  [[0,1,1],[1,1,0],[2,1,1],[3,1,1]],
         #                  [[0,2,0],[1,2,1],[2,2,0],[3,2,1]],
         #                  [[0,3,0],[1,3,1],[2,3,1],[3,3,1]]],dtype=np.float64)  
-        cp_2 = rng.random(( n2+1, m2+1, 3))
+
+        # cp_1 = np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1],[4,0,1]],
+        #                  [[0,1,1],[1,1,0],[2,1,1],[3,1,1],[4,1,1]],
+        #                  [[0,2,0],[1,2,1],[2,2,0],[3,2,1],[4,2,1]],
+        #                  [[0,3,0],[1,3,1],[2,3,1],[3,3,1],[4,3,1]]],dtype=np.float64) 
+        
+
+        cp_1 = np.array([[[0,0,rng.random()],[1,0,rng.random()],[2,0,rng.random()],[3,0,rng.random()],[4,0,rng.random()]],
+                         [[0,1,rng.random()],[1,1,rng.random()],[2,1,rng.random()],[3,1,rng.random()],[4,1,rng.random()]],
+                         [[0,2,rng.random()],[1,2,rng.random()],[2,2,rng.random()],[3,2,rng.random()],[4,2,rng.random()]],
+                         [[0,3,rng.random()],[1,3,rng.random()],[2,3,rng.random()],[3,3,rng.random()],[4,3,rng.random()]]],dtype=np.float64) 
+
+        #cp_2 = rng.random(( n2+1, m2+1, 3))
+        
+        #cp_2 = rng.random(( 4, 5, 3))
+
+        
 
         # cp_2 =  np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1]],
         #                  [[0,1,2],[1,1,1],[2,1,1],[3,1,1]],
         #                  [[0,2,0],[1,2,0],[2,2,1],[3,2,1]],
-        #                  [[0,3,0],[1,3,1],[2,3,1],[3,3,1]]],dtype=np.float64)      
+        #                  [[0,3,0],[1,3,1],[2,3,1],[3,3,1]]],dtype=np.float64)   
 
-        w_1 = rng.uniform(0.4, 0.5, (n1+1, m1+1))
-        w_2 = rng.uniform(0.9, 1.2, (n2+1, m2+1))
+        # cp_2 =  np.array([[[0,0,1],[1,0,1],[2,0,1],[3,0,1],[4,0,1]],
+        #                  [[0,1,2],[1,1,1],[2,1,1],[3,1,1],[4,1,1]],
+        #                  [[0,2,0],[1,2,0],[2,2,1],[3,2,1],[4,2,1]],
+        #                  [[0,3,0],[1,3,1],[2,3,1],[3,3,1],[4,3,1]]],dtype=np.float64)
+        # cp_2[:, :, 0] += 4      
 
+        cp_2 =  np.array([[[0,0,rng.random()],[1,0,rng.random()],[2,0,rng.random()],[3,0,rng.random()],[4,0,rng.random()]],
+                         [[0,1,rng.random()],[1,1,rng.random()],[2,1,rng.random()],[3,1,rng.random()],[4,1,rng.random()]],
+                         [[0,2,rng.random()],[1,2,rng.random()],[2,2,rng.random()],[3,2,rng.random()],[4,2,rng.random()]],
+                         [[0,3,rng.random()],[1,3,rng.random()],[2,3,rng.random()],[3,3,rng.random()],[4,3,rng.random()]]],dtype=np.float64)
+        cp_2[:, :, 0] += 4 
+
+
+
+        # w_1 = rng.uniform(0.4, 0.5, (n1+1, m1+1))
+        # w_2 = rng.uniform(0.9, 1.2, (n2+1, m2+1))
+
+        w_1 = rng.uniform(0.8, 1.2, (np.shape(cp_1)[0], np.shape(cp_1)[1]))
+        w_2 = rng.uniform(0.8, 1.2, (np.shape(cp_2)[0], np.shape(cp_2)[1]))
+
+
+        
+        #print(f'{cp_1=},{np.shape(cp_1)=}')
+        #print(f'{cp_2=},{np.shape(cp_2)=}')
+        
         #Loop through different compatible sides
 
         if (np.shape(cp_1)[0]==np.shape(cp_2)[0]):
@@ -324,19 +394,74 @@ def test_Rational_Bezier_Surface_2():
             i_vals=np.array([2,3])
             j_vals=np.array([2,3])
         
+        
         else:
             raise ValueError("Could not find matching degrees between the surfaces")
         
+        Rat_bez_surf_1 = RationalBezierSurface(cp_1,w_1)
+        Rat_bez_surf_2 = RationalBezierSurface(cp_2,w_2)
+
+        # plot= pv.Plotter()
+        # Rat_bez_surf_1.plot_surface(plot)
+        # Rat_bez_surf_1.plot_control_point_mesh_lines(plot)
+        # Rat_bez_surf_1.plot_control_points(plot)
+        # Rat_bez_surf_2.plot_surface(plot)
+        # Rat_bez_surf_2.plot_control_point_mesh_lines(plot)
+        # Rat_bez_surf_2.plot_control_points(plot)
+        # plot.set_background('black')
+        # plot.show()
+
+        # plot= pv.Plotter()
+        # Rat_bez_surf_1.plot_surface(plot)
+        # Rat_bez_surf_1.plot_control_point_mesh_lines(plot)
+        # Rat_bez_surf_1.plot_control_points(plot)
+        # Rat_bez_surf_2.plot_surface(plot)
+        # Rat_bez_surf_2.plot_control_point_mesh_lines(plot)
+        # Rat_bez_surf_2.plot_control_points(plot)
+        # plot.set_background('black')
+        # plot.show()
+        
+        Rat_bez_surf_1_org=copy.deepcopy(Rat_bez_surf_1)
+        Rat_bez_surf_2_org=copy.deepcopy(Rat_bez_surf_2)
+        
+
+        #COUNT NUMBER OF ENFORCEMENTS TRIED
+        
+
         for i in i_vals:
             for j in j_vals:
+                num_enforced=num_enforced+1
+                
                 side_self=SurfaceEdge(i)
                 side_other=SurfaceEdge(j)
 
+                #RESET TO ORIGINAL FOR EVERY ITERATION OF LOOP
+
+                Rat_bez_surf_1=copy.deepcopy(Rat_bez_surf_1_org)
+                Rat_bez_surf_2=copy.deepcopy(Rat_bez_surf_2_org)
+
+                
+
+
+                # Rat_bez_surf_1.enforce_g0g1g2(Rat_bez_surf_2, 1.0, side_self, side_other)
+                    
+                # # Verify G0, G1, and G2 continuity
+                # Rat_bez_surf_1.verify_g0(Rat_bez_surf_2, side_self, side_other)
+                # Rat_bez_surf_1.verify_g1(Rat_bez_surf_2, side_self, side_other)
+                # Rat_bez_surf_1.verify_g2(Rat_bez_surf_2, side_self, side_other)
+
+                # plot= pv.Plotter()
+                # Rat_bez_surf_1.plot_surface(plot)
+                # Rat_bez_surf_1.plot_control_point_mesh_lines(plot)
+                # Rat_bez_surf_1.plot_control_points(plot)
+                # Rat_bez_surf_2.plot_surface(plot)
+                # Rat_bez_surf_2.plot_control_point_mesh_lines(plot)
+                # Rat_bez_surf_2.plot_control_points(plot)
+                # plot.set_background('black')
+                # plot.show()
+
                 # Loop through each pair of control point meshes
                 
-                Rat_bez_surf_1 = RationalBezierSurface(cp_1,w_1)
-                Rat_bez_surf_2 = RationalBezierSurface(cp_2,w_2)
-
                 # Enforce G0, G1, and G2 continuity
                 try:
                     Rat_bez_surf_1.enforce_g0g1g2(Rat_bez_surf_2, 1.0, side_self, side_other)
@@ -347,11 +472,36 @@ def test_Rational_Bezier_Surface_2():
                     Rat_bez_surf_1.verify_g2(Rat_bez_surf_2, side_self, side_other)
                 except AssertionError:
                     Assertion_error_counter+=1
+
+                    
                     
                 except NegativeWeightError:
                     Negative_error_counter+=1
+                    print(f'{i=},{j=}')
+                    # plot= pv.Plotter()
+                    # Rat_bez_surf_1_org.plot_surface(plot)
+                    # Rat_bez_surf_1_org.plot_control_point_mesh_lines(plot)
+                    # Rat_bez_surf_1_org.plot_control_points(plot)
+                    # Rat_bez_surf_2_org.plot_surface(plot)
+                    # Rat_bez_surf_2_org.plot_control_point_mesh_lines(plot)
+                    # Rat_bez_surf_2_org.plot_control_points(plot)
+                    # plot.set_background('black')
+                    # plot.show()
+
+                    # plot= pv.Plotter()
+                    # Rat_bez_surf_1.plot_surface(plot)
+                    # Rat_bez_surf_1.plot_control_point_mesh_lines(plot)
+                    # Rat_bez_surf_1.plot_control_points(plot)
+                    # Rat_bez_surf_2.plot_surface(plot)
+                    # Rat_bez_surf_2.plot_control_point_mesh_lines(plot)
+                    # Rat_bez_surf_2.plot_control_points(plot)
+                    # plot.set_background('black')
+                    # plot.show()
+        
+    print(f'{n=},{num_enforced=}')    
     print(f'{n=},{Assertion_error_counter=}')
     print(f'{n=},{Negative_error_counter=}')
+    
 
 
 test_Rational_Bezier_Surface_2()
@@ -469,3 +619,4 @@ def test_Rational_Bezier_Surface_3():
 # Rat_bez_surf_2.plot_control_point_mesh_lines(plot)
 # Rat_bez_surf_2.plot_control_points(plot)
 # plot.show()
+

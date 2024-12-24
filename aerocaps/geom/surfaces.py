@@ -1687,7 +1687,7 @@ class RationalBezierSurface(Surface):
         other_perp_edge_derivs[np.absolute(other_perp_edge_derivs) < 1e-6] = 0.0
 
         ratios_other_self = other_perp_edge_derivs / self_perp_edge_derivs
-        print(f"{ratios_other_self=}")
+        #print(f"{ratios_other_self=}")
         #print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
         # Initialize an array of ratios of magnitude of the derivative values at each point for both sides
         # of the boundary
