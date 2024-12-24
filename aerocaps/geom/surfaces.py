@@ -1130,7 +1130,15 @@ class RationalBezierSurface(Surface):
                                           top_curve: Bezier3D or RationalBezierCurve3D,
                                           bottom_curve: Bezier3D or RationalBezierCurve3D) -> "RationalBezierSurface":
         """
-        Creates a fill surface from four boundary curves.
+        Creates a fill surface from four boundary curves by linearly interpolating the ``left_curve`` and
+        ``right_curve`` and displacing the edges created by the interpolation to form the ``top_curve``
+        and ``bottom_curve`` boundaries.
+
+        .. figure:: ../images/fill_surface.*
+            :width: 600
+            :align: center
+
+        Fill surface from four curve boundaries
 
         .. warning::
 
@@ -1250,13 +1258,13 @@ class RationalBezierSurface(Surface):
         Pw = np.array(arrays_to_stack)
 
         # Displace the control points associated with the top side of the surface
-        for Pw_slice, curve_Pw in zip(Pw[1:-1], top_cps[1:-1]):
+        for Pw_slice, curve_Pw in zip(Pw[1:-1], bottom_cps[1:-1]):
             displacement = curve_Pw - Pw_slice[0]
             for i in range(left_curve.degree):
                 Pw_slice[i] += (left_curve.degree - i) / left_curve.degree * displacement
 
         # Displace the control points associated with the bottom side of the surface
-        for Pw_slice, curve_Pw in zip(Pw[1:-1], bottom_cps[1:-1]):
+        for Pw_slice, curve_Pw in zip(Pw[1:-1], top_cps[1:-1]):
             displacement = curve_Pw - Pw_slice[-1]
             for i in range(left_curve.degree):
                 Pw_slice[-1 - i] += (left_curve.degree - i) / left_curve.degree * displacement

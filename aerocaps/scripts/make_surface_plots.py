@@ -5,6 +5,7 @@ import pyvista as pv
 
 import aerocaps as ac
 import aerocaps.examples.bezier_surface
+import aerocaps.examples.fill_surface
 
 
 def plot_bezier_surf_2x3(image_dir: str = None):
@@ -156,12 +157,43 @@ def plot_bezier_surf_2x3_v_elevated(image_dir: str = None):
         plot.show()
 
 
+def plot_fill_surface(image_dir: str = None):
+    r"""
+    Plots a fill surface along with its boundary curves.
+
+    Parameters
+    ----------
+    image_dir: str or None
+        Where to store the output image. If no location is specified, the image file will not be saved, and the
+        plot will be displayed on-screen instead. Default: ``None``
+    """
+    plot = pv.Plotter(off_screen=True if image_dir else False, window_size=[1024, 600])
+
+    # Load the example surface
+    surf, boundaries = aerocaps.examples.fill_surface.fill_surface_four_sided()
+
+    surf.plot_surface(plot, color="#4d86b8", opacity=0.5)
+    for curve in boundaries:
+        curve.plot(plot, color="black")
+    # surf.plot_control_points(plot, render_points_as_spheres=True, point_size=20, color="black")
+    # surf.plot_control_point_mesh_lines(plot, color="#d6693a")
+    plot.camera.position = [-1.2, -0.9, 1.0]
+    plot.camera.focal_point = [0.6, 0.5, -0.05]
+    plot.camera.zoom(1.2)
+
+    if image_dir is not None:
+        plot.screenshot(os.path.join(image_dir, "fill_surface.png"), scale=1)
+    else:
+        plot.show()
+
+
 def main(*args, **kwargs):
-    plot_bezier_surf_2x3(*args, **kwargs)
-    plot_bezier_surf_2x3_uv_labels(*args, **kwargs)
+    # plot_bezier_surf_2x3(*args, **kwargs)
+    # plot_bezier_surf_2x3_uv_labels(*args, **kwargs)
     # plot_bezier_surf_2x3_mesh_only(*args, **kwargs)
-    plot_bezier_surf_2x3_u_elevated(*args, **kwargs)
-    plot_bezier_surf_2x3_v_elevated(*args, **kwargs)
+    # plot_bezier_surf_2x3_u_elevated(*args, **kwargs)
+    # plot_bezier_surf_2x3_v_elevated(*args, **kwargs)
+    plot_fill_surface(*args, **kwargs)
 
 
 if __name__ == "__main__":

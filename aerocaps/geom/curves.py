@@ -38,6 +38,12 @@ __all__ = [
     "CurveOnParametricSurface"
 ]
 
+_projection_dict = {
+    "X": 0,
+    "Y": 1,
+    "Z": 2,
+}
+
 
 class PCurveData2D:
     def __init__(self, t: np.ndarray, xy: np.ndarray, xpyp: np.ndarray, xppypp: np.ndarray, k: np.ndarray,
@@ -695,6 +701,8 @@ class Bezier3D(PCurve3D):
             The columns represent :math:`C^{(m)}_x(t)` and :math:`C^{(m)}_y(t)`, where :math:`m` is the
             derivative order.
         """
+        if order > degree:
+            return np.zeros((len(t), 3))
         return np.sum(np.array([np.prod(np.array([degree - idx for idx in range(order)])) *
                                 np.array([self.finite_diff_P(P, order, i)]).T *
                                 np.array([bernstein_poly(degree - order, i, t)])
@@ -893,6 +901,22 @@ class Bezier3D(PCurve3D):
             Bezier3D(bez_2_points)
         )
 
+    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, t_vec: np.ndarray = None, **plt_kwargs):
+        projection = "XYZ" if projection is None else projection
+        t_vec = np.linspace(0.0, 1.0, 201) if t_vec is None else None
+        data = self.evaluate(t_vec).xyz
+        args = tuple([data[:, _projection_dict[axis]] for axis in projection])
+
+        if isinstance(ax, plt.Axes):
+            ax.plot(*args, **plt_kwargs)
+        elif isinstance(ax, pv.Plotter):
+            arr = [data[0]]
+            for row in data[1:-1]:
+                arr.append(row)
+                arr.append(row)
+            arr.append(data[-1])
+            ax.add_lines(np.array(arr), **plt_kwargs)
+
 
 class NURBSCurve3D(Geometry3D):
     def __init__(self,
@@ -1017,12 +1041,6 @@ class NURBSCurve3D(Geometry3D):
 
 class RationalBezierCurve3D(Geometry3D):
 
-    _projection_dict = {
-        "X": 0,
-        "Y": 1,
-        "Z": 2,
-    }
-
     def __init__(self,
                  control_points: typing.List[Point3D],
                  weights: np.ndarray):
@@ -1145,17 +1163,26 @@ class RationalBezierCurve3D(Geometry3D):
         points = np.array([self.evaluate_ndarray(t) for t in t_vec])
         return points
 
-    def plot(self, ax: plt.Axes, projection: str = None, t_vec: np.ndarray = None, **plt_kwargs):
+    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, t_vec: np.ndarray = None, **plt_kwargs):
         projection = "XYZ" if projection is None else projection
         t_vec = np.linspace(0.0, 1.0, 201) if t_vec is None else None
         data = self.evaluate(t_vec)
-        args = tuple([data[:, self._projection_dict[axis]] for axis in projection])
-        ax.plot(*args, **plt_kwargs)
+        args = tuple([data[:, _projection_dict[axis]] for axis in projection])
+
+        if isinstance(ax, plt.Axes):
+            ax.plot(*args, **plt_kwargs)
+        elif isinstance(ax, pv.Plotter):
+            arr = [data[0]]
+            for row in data[1:-1]:
+                arr.append(row)
+                arr.append(row)
+            arr.append(data[-1])
+            ax.add_lines(np.array(arr), **plt_kwargs)
 
     def plot_control_points(self, ax: plt.Axes, projection: str = None, **plt_kwargs):
         projection = "XYZ" if projection is None else projection
         cps = self.get_control_point_array()
-        args = tuple([cps[:, self._projection_dict[axis]] for axis in projection])
+        args = tuple([cps[:, _projection_dict[axis]] for axis in projection])
         ax.plot(*args, **plt_kwargs)
 
     def compute_curvature_at_t0(self) -> float:
