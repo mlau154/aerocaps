@@ -347,7 +347,7 @@ class BezierSurface(Surface):
         edge: SurfaceEdge
             Edge along which to evaluate
         n_points: int
-            Number of evenly-spaced parameter locations at which to evaluate the edge curve
+            Number of evenly-spaced parameter locations at which to evaluate the edge curve. Default: 10
 
         Returns
         -------
@@ -366,6 +366,27 @@ class BezierSurface(Surface):
             raise ValueError(f"No edge called {edge}")
 
     def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular derivative along a surface edge at ``n_points`` parameter locations.
+        The derivative represents either :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}` or
+        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
         if edge == SurfaceEdge.v1:
             return np.array([(self.dSdv(u, 1.0) if perp else
                               self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
@@ -382,6 +403,27 @@ class BezierSurface(Surface):
             raise ValueError(f"No edge called {edge}")
 
     def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular second derivative along a surface edge at ``n_points`` parameter
+        locations. The derivative represents either :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}` or
+        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the second derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the second derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
         if edge == SurfaceEdge.v1:
             return np.array([(self.d2Sdv2(u, 1.0) if perp else
                               self.d2Sdu2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
@@ -492,15 +534,59 @@ class BezierSurface(Surface):
                 assert np.isclose(dxdydz_ratio, current_f)
 
     def evaluate_simple(self, u: float, v: float) -> Point3D:
+        r"""
+        Evaluates the Bézier surface at a single :math:`(u,v)` parameter pair and returns a point object.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        Point3D
+            Point object corresponding to the :math:`(u,v)` pair
+        """
         return Point3D.from_array(self.evaluate_ndarray(u, v))
 
     def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the Bézier surface on a uniform :math:`N_u \times N_v` grid of parameter values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of uniformly spaced parameter values in the :math:`u`-direction
+        Nv: int
+            Number of uniformly spaced parameter values in the :math:`v`-direction
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
         U, V = np.meshgrid(np.linspace(0.0, 1.0, Nu), np.linspace(0.0, 1.0, Nv))
         return np.array(
             [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])]
         )
 
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> Bezier3D:
+        """
+        Extracts the control points from one of the four edges of the Bézier surface and outputs a Bézier curve with
+        these control points
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which to extract the curve
+
+        Returns
+        -------
+        Bezier3D
+            Bézier curve with control points corresponding to the control points along the edge of the surface
+        """
         P = self.get_control_point_array()
 
         if surface_edge == SurfaceEdge.u0:
@@ -623,6 +709,19 @@ class BezierSurface(Surface):
         return np.array([self.evaluate_ndarray(u, v) for v in v_vec])
 
     def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the degree of the curve corresponding to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree parallel to the edge
+        """
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_u
         return self.degree_v
