@@ -727,11 +727,60 @@ class BezierSurface(Surface):
         return self.degree_v
 
     def get_perpendicular_degree(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the degree of the curve in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree perpendicular to the edge
+        """
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_v
         return self.degree_u
 
     def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> Point3D:
+        r"""
+        Gets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` Bézier surface,
+        the following code
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.v0)
+
+        returns the point :math:`\mathbf{P}_{2,1}` and
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.u1)
+
+        returns the point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.set_point`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+
+        Returns
+        -------
+        Point3D
+            Point used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
         if surface_edge == SurfaceEdge.v1:
             return self.points[row_index][-(continuity_index + 1)]
         elif surface_edge == SurfaceEdge.v0:
@@ -744,6 +793,41 @@ class BezierSurface(Surface):
             raise ValueError("Invalid surface_edge value")
 
     def set_point(self, point: Point3D, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` Bézier surface,
+        the following code
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of point :math:`\mathbf{P}_{2,1}` to :math:`[3,4,5]^T` and
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.get_point(p, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` to :math:`[3,4,5]^T`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.get_point`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        point: Point3D
+            Point object to apply at the specified indices
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+        """
         if surface_edge == SurfaceEdge.v1:
             self.points[row_index][-(continuity_index + 1)] = point
         elif surface_edge == SurfaceEdge.v0:
