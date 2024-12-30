@@ -841,16 +841,91 @@ class BezierSurface(Surface):
 
     def enforce_g0(self, other: "BezierSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Enforces :math:`G^0` continuity along the input ``surface_edge`` by equating the control points along this edge
+        to the control points along the ``other_surface_edge`` of the Bézier surface given by ``other``.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
 
+        .. important::
+
+            The parallel degree of the current surface along ``surface_edge`` must be equal to the parallel degree
+            of the ``other`` surface along ``other_surface_edge``, otherwise an ``AssertionError`` will be raised.
+            If these degrees are not equal, first elevate the degree of the surface with the lower parallel degree
+            until the degrees match using either :obj:`~aerocaps.geom.surfaces.BezierSurface.elevate_degree_u`
+            or :obj:`~aerocaps.geom.surfaces.BezierSurface.elevate_degree_v`, whichever is appropriate.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_c0`
+                Parametric continuity equivalent (:math:`C^0`)
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         assert self.get_parallel_degree(surface_edge) == other.get_parallel_degree(other_surface_edge)
         for row_index in range(self.get_parallel_degree(surface_edge) + 1):
             self.set_point(other.get_point(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
 
     def enforce_c0(self, other: "BezierSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        """
+        For zeroth-degree continuity, there is no difference between geometric (:math:`G^0`) and parametric
+        (:math:`C^0`) continuity. Because this method is simply a convenience method that calls
+        :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0`, see the documentation for that method for more
+        detailed documentation.
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0(other, surface_edge, other_surface_edge)
 
     def enforce_g0g1(self, other: "BezierSurface", f: float,
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` continuity, then tangent (:math:`G^1`) continuity is enforced according to
+        the following equation:
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,1} = \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \left[\mathcal{P}^{a,\mathcal{E}_a}_{k,0} - \mathcal{P}^{a,\mathcal{E}_a}_{k,1} \right] \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0`
+                Geometric point continuity enforcement (:math:`G^0`)
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_c0c1`
+                Parametric continuity equivalent (:math:`C^1`)
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0(other, surface_edge, other_surface_edge)
         n_ratio = other.get_perpendicular_degree(other_surface_edge) / self.get_perpendicular_degree(surface_edge)
         for row_index in range(self.get_parallel_degree(surface_edge) + 1):
@@ -863,10 +938,57 @@ class BezierSurface(Surface):
 
     def enforce_c0c1(self, other: "BezierSurface",
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0g1` with ``f=1.0``. See that
+        method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
 
     def enforce_g0g1g2(self, other: "BezierSurface", f: float,
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` and :math:`G^1` continuity, then curvature (:math:`G^2`) continuity is enforced
+        according to the following equation:
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,2} = 2 \mathcal{P}^{b,\mathcal{E}_b}_{k,1} - \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \left[ \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{P}^{a,\mathcal{E}_a}_{k,1} + \mathcal{P}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0`
+                Geometric point continuity enforcement (:math:`G^0`)
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0g1`
+                Geometric tangent continuity enforcement (:math:`G^1`)
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_c0c1c2`
+                Parametric continuity equivalent (:math:`C^2`)
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
         p_perp_a = other.get_perpendicular_degree(other_surface_edge)
         p_perp_b = self.get_perpendicular_degree(surface_edge)
@@ -884,6 +1006,20 @@ class BezierSurface(Surface):
     def enforce_c0c1c2(self, other: "BezierSurface",
 
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0g1g2` with ``f=1.0``. See that
+        method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
 
     def get_u_or_v_given_uvxyz(self, u: float = None, v: float = None, uv_guess: float = 0.5,
