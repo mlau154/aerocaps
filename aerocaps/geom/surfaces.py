@@ -870,7 +870,12 @@ class BezierSurface(Surface):
             Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
             of the current surface
         """
-        assert self.get_parallel_degree(surface_edge) == other.get_parallel_degree(other_surface_edge)
+        self_parallel_degree = self.get_parallel_degree(surface_edge)
+        other_parallel_degree = other.get_parallel_degree(other_surface_edge)
+        if self_parallel_degree != other_parallel_degree:
+            raise ValueError(f"Degree parallel to the edge of the input surface ({self_parallel_degree}) does "
+                             f"not match the degree parallel to the edge of the other surface "
+                             f"({other_parallel_degree})")
         for row_index in range(self.get_parallel_degree(surface_edge) + 1):
             self.set_point(other.get_point(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
 
@@ -1706,7 +1711,12 @@ class RationalBezierSurface(Surface):
     def enforce_g0(self, other: "RationalBezierSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
         # P^b[:, 0] = P^a[:, -1]
-        assert self.get_parallel_degree(surface_edge) == other.get_parallel_degree(other_surface_edge)
+        self_parallel_degree = self.get_parallel_degree(surface_edge)
+        other_parallel_degree = other.get_parallel_degree(other_surface_edge)
+        if self_parallel_degree != other_parallel_degree:
+            raise ValueError(f"Degree parallel to the edge of the input surface ({self_parallel_degree}) does "
+                             f"not match the degree parallel to the edge of the other surface "
+                             f"({other_parallel_degree})")
         for row_index in range(self.get_parallel_degree(surface_edge) + 1):
             self.set_point(other.get_point(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
             self.set_weight(other.get_weight(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
