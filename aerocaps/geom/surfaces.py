@@ -1495,7 +1495,7 @@ class RationalBezierSurface(Surface):
         if isinstance(bottom_curve, Bezier3D):
             bottom_curve = bottom_curve.to_rational_bezier_curve()
 
-        # Ensure the the boundary curve loop is closed
+        # Ensure the boundary curve loop is closed
         left_cps = left_curve.get_homogeneous_control_points()
         right_cps = right_curve.get_homogeneous_control_points()
         top_cps = top_curve.get_homogeneous_control_points()
