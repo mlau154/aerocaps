@@ -1160,8 +1160,29 @@ class RationalBezierCurve3D(Geometry3D):
         """
         Evaluates the NURBS curve at a vector of parameter values
         """
-        points = np.array([self.evaluate_ndarray(t) for t in t_vec])
+        points = np.array([self.evaluate_simple(t) for t in t_vec])
         return points
+
+    def compute_t_corresponding_to_x(self, x_seek: float, t0: float = 0.5):
+        def bez_root_find_func(t):
+            point = self.evaluate_simple(t[0])
+            return np.array([point.x.m - x_seek])
+
+        return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
+
+    def compute_t_corresponding_to_y(self, y_seek: float, t0: float = 0.5):
+        def bez_root_find_func(t):
+            point = self.evaluate_simple(t[0])
+            return np.array([point.y.m - y_seek])
+
+        return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
+
+    def compute_t_corresponding_to_z(self, z_seek: float, t0: float = 0.5):
+        def bez_root_find_func(t):
+            point = self.evaluate_simple(t[0])
+            return np.array([point.z.m - z_seek])
+
+        return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
     def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, t_vec: np.ndarray = None, **plt_kwargs):
         projection = "XYZ" if projection is None else projection
