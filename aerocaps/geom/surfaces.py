@@ -1274,7 +1274,14 @@ class RationalBezierSurface(Surface):
         self.weights = weights
         self.degree_u = degree_u
         self.degree_v = degree_v
-        self.Nu, self.Nv = len(points), len(points[0])
+
+    @property
+    def Nu(self):
+        return len(self.points)
+
+    @property
+    def Nv(self):
+        return len(self.points[0])
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.surfaces.RationalBSplineSurfaceIGES(
@@ -1614,7 +1621,7 @@ class RationalBezierSurface(Surface):
 
         return point / wBuBv_sum
 
-    def evaluate_simple(self, u: float, v: float):
+    def evaluate_simple(self, u: float, v: float) -> Point3D:
         return Point3D.from_array(self.evaluate_ndarray(u, v))
 
     def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
@@ -2414,19 +2421,19 @@ class RationalBezierSurface(Surface):
 
 class NURBSSurface(Surface):
     def __init__(self,
-                 control_points: np.ndarray,
+                 points: typing.List[typing.List[Point3D]] or np.ndarray,
                  knots_u: np.ndarray,
                  knots_v: np.ndarray,
                  weights: np.ndarray,
-                 degree_u: int, degree_v: int,
                  ):
-        assert control_points.ndim == 3
+        if isinstance(points, np.ndarray):
+            points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
+        self.points = points
         assert knots_u.ndim == 1
         assert knots_v.ndim == 1
         assert weights.ndim == 2
-        assert len(knots_u) == control_points.shape[0] + degree_u + 1
-        assert len(knots_v) == control_points.shape[1] + degree_v + 1
-        assert control_points[:, :, 0].shape == weights.shape
+        assert len(points) == weights.shape[0]
+        assert len(points[0]) == weights.shape[1]
 
         # Negative weight check
         for weight_row in weights:
@@ -2434,25 +2441,110 @@ class NURBSSurface(Surface):
                 if weight < 0:
                     raise NegativeWeightError("All weights must be non-negative")
 
-        self.control_points = control_points
         self.knots_u = knots_u
         self.knots_v = knots_v
         self.weights = weights
-        self.degree_u = degree_u
-        self.degree_v = degree_v
-        self.Nu, self.Nv = control_points.shape[0], control_points.shape[1]
         self.possible_spans_u, self.possible_span_indices_u = self._get_possible_spans(self.knots_u)
         self.possible_spans_v, self.possible_span_indices_v = self._get_possible_spans(self.knots_v)
 
+    @property
+    def Nu(self) -> int:
+        """
+        Number of control points in the :math:`u`-parametric direction
+
+        Returns
+        -------
+        int
+        """
+        return len(self.points)
+
+    @property
+    def Nv(self) -> int:
+        """
+        Number of control points in the :math:`v`-parametric direction
+
+        Returns
+        -------
+        int
+        """
+        return len(self.points[0])
+
+    @property
+    def degree_u(self) -> int:
+        """
+        Surface degree in the :math:`u`-parametric direction
+
+        Returns
+        -------
+        int
+        """
+        return len(self.knots_u) - self.Nu - 1
+
+    @property
+    def degree_v(self) -> int:
+        """
+        Surface degree in the :math:`v`-parametric direction
+
+        Returns
+        -------
+        int
+        """
+        return len(self.knots_v) - self.Nv - 1
+
+    @property
+    def n(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.NURBSSurface.degree_u`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`u`-parametric direction
+        """
+        return self.degree_u
+
+    @property
+    def m(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.NURBSSurface.degree_v`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`v`-parametric direction
+        """
+        return self.degree_v
+
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.surfaces.RationalBSplineSurfaceIGES(
-            control_points=self.control_points,
+            control_points=self.get_control_point_array(),
             knots_u=self.knots_u,
             knots_v=self.knots_v,
             weights=self.weights,
             degree_u=self.degree_u,
             degree_v=self.degree_v
         )
+
+    def get_control_point_array(self) -> np.ndarray:
+        return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
+
+    def get_homogeneous_control_points(self) -> np.ndarray:
+        r"""
+        Gets the array of control points in homogeneous coordinates, :math:`\mathbf{P}_{i,j} \cdot w_{i,j}`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n + 1) \times (m + 1) \times 4`,
+            where :math:`n` is the surface degree in the :math:`u`-direction and :math:`m` is the surface
+            degree in the :math:`v`-direction. The four elements of the last array dimension are, in order,
+            the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
+            control point.
+        """
+        return np.dstack((
+            self.get_control_point_array() * np.repeat(self.weights[:, :, np.newaxis], 3, axis=2),
+            self.weights
+        ))
 
     @classmethod
     def from_bezier_revolve(cls, bezier: Bezier3D, axis: Line3D, start_angle: Angle, end_angle: Angle):
@@ -2518,7 +2610,7 @@ class NURBSSurface(Surface):
         degree_v = 2
         degree_u = len(bezier.control_points) - 1
 
-        return cls(control_points, knots_u, knots_v, weights, degree_u, degree_v)
+        return cls(control_points, knots_u, knots_v, weights)
 
     @staticmethod
     def _get_possible_spans(knot_vector) -> (np.ndarray, np.ndarray):
@@ -2581,17 +2673,18 @@ class NURBSSurface(Surface):
             return possible_span_indices_u_or_v[-1]
 
     def evaluate_ndarray(self, u: float, v: float) -> np.ndarray:
+        P = self.get_control_point_array()
         Bu = self._basis_functions(u, self.degree_u, self.knots_u, self.Nu,
                                    self.possible_spans_u, self.possible_span_indices_u)
         Bv = self._basis_functions(v, self.degree_v, self.knots_v, self.Nv,
                                    self.possible_spans_v, self.possible_span_indices_v)
 
-        weighted_cps = np.zeros(self.control_points.shape[2])
+        weighted_cps = np.zeros(P.shape[2])
         denominator = 0.0
 
         for i in range(self.Nu):
             for j in range(self.Nv):
-                weighted_cps += self.control_points[i][j] * Bu[i] * Bv[j] * self.weights[i][j]
+                weighted_cps += P[i][j] * Bu[i] * Bv[j] * self.weights[i][j]
                 denominator += Bu[i] * Bv[j] * self.weights[i][j]
 
         return weighted_cps / denominator
@@ -2604,8 +2697,238 @@ class NURBSSurface(Surface):
         return np.array(
             [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])])
 
+    def get_parallel_control_point_length(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the number of control points of the curve corresponding to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the number of control points is computed
+
+        Returns
+        -------
+        int
+            Number of control points parallel to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.Nu
+        return self.Nv
+
+    def get_perpendicular_control_point_length(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the number of control points in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the number of perpendicular control points is computed
+
+        Returns
+        -------
+        int
+            Number of control points perpendicular to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.Nv
+        return self.Nu
+
+    def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the degree of the curve corresponding to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree parallel to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.degree_u
+        return self.degree_v
+
+    def get_perpendicular_degree(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the degree of the curve in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree perpendicular to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.degree_v
+        return self.degree_u
+
+    def get_parallel_knots(self, surface_edge: SurfaceEdge) -> np.ndarray:
+        r"""
+        Gets the knots in the parametric direction parallel to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel knots are returned
+
+        Returns
+        -------
+        numpy.ndarray
+            Knots parallel to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.knots_u
+        return self.knots_v
+
+    def get_perpendicular_knots(self, surface_edge: SurfaceEdge) -> np.ndarray:
+        r"""
+        Gets the knots in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular knots are returned
+
+        Returns
+        -------
+        numpy.ndarray
+            Knots perpendicular to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.knots_v
+        return self.knots_u
+
+    def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> Point3D:
+        r"""
+        Gets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` NURBS surface,
+        the following code
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.v0)
+
+        returns the point :math:`\mathbf{P}_{2,1}` and
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.u1)
+
+        returns the point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` if there are no internal knot vectors.
+        If the NURBS surface has internal knot vectors, the actual :math:`i`-index of the point may be different,
+        but the second-to-last point in the third row of control points will still be returned.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.set_point`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+
+        Returns
+        -------
+        Point3D
+            Point used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
+        if surface_edge == SurfaceEdge.v1:
+            return self.points[row_index][-(continuity_index + 1)]
+        elif surface_edge == SurfaceEdge.v0:
+            return self.points[row_index][continuity_index]
+        elif surface_edge == SurfaceEdge.u1:
+            return self.points[-(continuity_index + 1)][row_index]
+        elif surface_edge == SurfaceEdge.u0:
+            return self.points[continuity_index][row_index]
+        else:
+            raise ValueError("Invalid surface_edge value")
+
+    def set_point(self, point: Point3D, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` NURBS surface,
+        the following code
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of point :math:`\mathbf{P}_{2,1}` to :math:`[3,4,5]^T` and
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.get_point(p, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` to :math:`[3,4,5]^T` if there are no
+        internal knot vectors.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.get_point`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        point: Point3D
+            Point object to apply at the specified indices
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+        """
+        if surface_edge == SurfaceEdge.v1:
+            self.points[row_index][-(continuity_index + 1)] = point
+        elif surface_edge == SurfaceEdge.v0:
+            self.points[row_index][continuity_index] = point
+        elif surface_edge == SurfaceEdge.u1:
+            self.points[-(continuity_index + 1)][row_index] = point
+        elif surface_edge == SurfaceEdge.u0:
+            self.points[continuity_index][row_index] = point
+        else:
+            raise ValueError("Invalid surface_edge value")
+
+    def get_weight(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        if surface_edge == SurfaceEdge.v1:
+            return self.weights[row_index][-(continuity_index + 1)]
+        elif surface_edge == SurfaceEdge.v0:
+            return self.weights[row_index][continuity_index]
+        elif surface_edge == SurfaceEdge.u1:
+            return self.weights[-(continuity_index + 1)][row_index]
+        elif surface_edge == SurfaceEdge.u0:
+            return self.weights[continuity_index][row_index]
+        else:
+            raise ValueError("Invalid surface_edge value")
+
+    def set_weight(self, weight: float, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        if surface_edge == SurfaceEdge.v1:
+            self.weights[row_index][-(continuity_index + 1)] = weight
+        elif surface_edge == SurfaceEdge.v0:
+            self.weights[row_index][continuity_index] = weight
+        elif surface_edge == SurfaceEdge.u1:
+            self.weights[-(continuity_index + 1)][row_index] = weight
+        elif surface_edge == SurfaceEdge.u0:
+            self.weights[continuity_index][row_index] = weight
+        else:
+            raise ValueError("Invalid surface_edge value")
+
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> NURBSCurve3D:
-        P = self.control_points
+        P = self.get_control_point_array()
         w = self.weights
 
         if surface_edge == SurfaceEdge.u0:
@@ -2619,20 +2942,113 @@ class NURBSSurface(Surface):
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
 
+    def enforce_g0(self, other: "NURBSSurface",
+                   surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        # P^b[:, 0] = P^a[:, -1]
+        self_parallel_knots = self.get_parallel_knots(surface_edge)
+        other_parallel_knots = other.get_parallel_knots(other_surface_edge)
+        self_parallel_degree = self.get_parallel_degree(surface_edge)
+        other_parallel_degree = other.get_parallel_degree(other_surface_edge)
+        if len(self_parallel_knots) != len(other_parallel_knots):
+            raise ValueError(f"Length of the knot vector parallel to the edge of the input surface "
+                             f"({len(self_parallel_knots)}) is not equal to the length of the knot vector "
+                             f"parallel to the edge of the other surface ({len(other_parallel_knots)})")
+        if any([k1 != k2 for k1, k2 in zip(self_parallel_knots, other_parallel_knots)]):
+            raise ValueError(f"Knots parallel to the edge of the input surface ({self_parallel_knots}) "
+                             f"are not equal to the knots in the direction parallel to the edge of the other "
+                             f"surface ({other_parallel_knots})")
+        if self_parallel_degree != other_parallel_degree:
+            raise ValueError(f"Degree parallel to the edge of the input surface ({self_parallel_degree}) does "
+                             f"not match the degree parallel to the edge of the other surface "
+                             f"({other_parallel_degree})")
+        for row_index in range(self.get_parallel_control_point_length(surface_edge)):
+            self.set_point(other.get_point(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
+            self.set_weight(other.get_weight(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
+
+    def enforce_c0(self, other: "NURBSSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        self.enforce_g0(other, surface_edge, other_surface_edge)
+
+    def enforce_g0g1(self, other: "NURBSSurface", f: float,
+                     surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+
+        self.enforce_g0(other, surface_edge, other_surface_edge)
+        n_ratio = other.get_perpendicular_degree(other_surface_edge) / self.get_perpendicular_degree(surface_edge)
+        for row_index in range(self.get_parallel_control_point_length(surface_edge)):
+
+            w_i0_b = self.get_weight(row_index, 0, surface_edge)
+            w_im_a = other.get_weight(row_index, 0, other_surface_edge)
+            w_im1_a = other.get_weight(row_index, 1, other_surface_edge)
+
+            w_i1_b = w_i0_b + f * n_ratio * (w_im_a - w_im1_a)
+
+            if w_i1_b < 0:
+                raise NegativeWeightError("G1 enforcement generated a negative weight")
+
+            self.set_weight(w_i1_b, row_index, 1, surface_edge)
+
+            P_i0_b = self.get_point(row_index, 0, surface_edge)
+            P_im_a = other.get_point(row_index, 0, other_surface_edge)
+            P_im1_a = other.get_point(row_index, 1, other_surface_edge)
+
+            P_i1_b = w_i0_b / w_i1_b * P_i0_b + f * n_ratio / w_i1_b * (w_im_a * P_im_a - w_im1_a * P_im1_a)
+            self.set_point(P_i1_b, row_index, 1, surface_edge)
+
+    def enforce_c0c1(self, other: "NURBSSurface",
+                     surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
+
+    def enforce_g0g1g2(self, other: "NURBSSurface", f: float,
+                       surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
+        n_ratio = (other.get_perpendicular_degree(other_surface_edge) ** 2 -
+                   other.get_perpendicular_degree(other_surface_edge)) / (
+                          self.get_perpendicular_degree(surface_edge) ** 2 - self.get_perpendicular_degree(
+                      surface_edge))
+        for row_index in range(self.get_parallel_control_point_length(surface_edge)):
+
+            w_i0_b = self.get_weight(row_index, 0, surface_edge)
+            w_i1_b = self.get_weight(row_index, 1, surface_edge)
+            w_im_a = other.get_weight(row_index, 0, other_surface_edge)
+            w_im1_a = other.get_weight(row_index, 1, other_surface_edge)
+            w_im2_a = other.get_weight(row_index, 2, other_surface_edge)
+
+            w_i2_b = 2.0 * w_i1_b - w_i0_b + f ** 2 * n_ratio * (w_im_a - 2.0 * w_im1_a + w_im2_a)
+
+            if w_i2_b < 0:
+                raise NegativeWeightError("G2 enforcement generated a negative weight")
+
+            self.set_weight(w_i2_b, row_index, 2, surface_edge)
+
+            P_i0_b = self.get_point(row_index, 0, surface_edge)
+            P_i1_b = self.get_point(row_index, 1, surface_edge)
+            P_im_a = other.get_point(row_index, 0, other_surface_edge)
+            P_im1_a = other.get_point(row_index, 1, other_surface_edge)
+            P_im2_a = other.get_point(row_index, 2, other_surface_edge)
+
+            P_i2_b = (2.0 * w_i1_b / w_i2_b * P_i1_b - w_i0_b / w_i2_b * P_i0_b) + f ** 2 * n_ratio * (
+                        1 / w_i2_b) * (
+                             w_im_a * P_im_a - 2.0 * w_im1_a * P_im1_a + w_im2_a * P_im2_a)
+            self.set_point(P_i2_b, row_index, 2, surface_edge)
+
+    def enforce_c0c1c2(self, other: "NURBSSurface",
+                       surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
+
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
 
+        control_points = self.get_control_point_array()
         points = []
         lines = []
 
         for i in range(self.Nu):
             for j in range(self.Nv):
-                points.append(Point3D.from_array(self.control_points[i, j, :]))
+                points.append(Point3D.from_array(control_points[i, j, :]))
 
         for i in range(self.Nu - 1):
             for j in range(self.Nv - 1):
-                point_obj_1 = Point3D.from_array(self.control_points[i, j, :])
-                point_obj_2 = Point3D.from_array(self.control_points[i + 1, j, :])
-                point_obj_3 = Point3D.from_array(self.control_points[i, j + 1, :])
+                point_obj_1 = Point3D.from_array(control_points[i, j, :])
+                point_obj_2 = Point3D.from_array(control_points[i + 1, j, :])
+                point_obj_3 = Point3D.from_array(control_points[i, j + 1, :])
 
                 line_1 = Line3D(p0=point_obj_1, p1=point_obj_2)
                 line_2 = Line3D(p0=point_obj_1, p1=point_obj_3)
@@ -2641,7 +3057,7 @@ class NURBSSurface(Surface):
                 if i < self.Nu - 2 and j < self.Nv - 2:
                     continue
 
-                point_obj_4 = Point3D.from_array(self.control_points[i + 1, j + 1, :])
+                point_obj_4 = Point3D.from_array(control_points[i + 1, j + 1, :])
                 line_3 = Line3D(p0=point_obj_3, p1=point_obj_4)
                 line_4 = Line3D(p0=point_obj_2, p1=point_obj_4)
                 lines.extend([line_3, line_4])
