@@ -1242,6 +1242,9 @@ class BezierSurface(Surface):
 
 
 class RationalBezierSurface(Surface):
+    """
+    Rational Bézier surface class. A NURBS surface with no internal knot vectors.
+    """
     def __init__(self,
                  points: typing.List[typing.List[Point3D]] or np.ndarray,
                  weights: np.ndarray,
@@ -2420,6 +2423,9 @@ class RationalBezierSurface(Surface):
 
 
 class NURBSSurface(Surface):
+    """
+    NURBS surface class
+    """
     def __init__(self,
                  points: typing.List[typing.List[Point3D]] or np.ndarray,
                  knots_u: np.ndarray,
@@ -2653,8 +2659,8 @@ class NURBSSurface(Surface):
     def _cox_de_boor(self, t: float, i: int, p: int, knot_vector: np.ndarray,
                      possible_spans_u_or_v: np.ndarray, possible_span_indices_u_or_v: np.ndarray) -> float:
         if p == 0:
-            return 1.0 if i in possible_span_indices_u_or_v and self._find_span(t, possible_spans_u_or_v,
-                                                                                possible_span_indices_u_or_v) == i else 0.0
+            return 1.0 if i in possible_span_indices_u_or_v and self._find_span(
+                t, possible_spans_u_or_v, possible_span_indices_u_or_v) == i else 0.0
         else:
             with (np.errstate(divide="ignore", invalid="ignore")):
                 f = (t - knot_vector[i]) / (knot_vector[i + p] - knot_vector[i])
