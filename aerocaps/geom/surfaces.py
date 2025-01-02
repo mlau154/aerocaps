@@ -2516,6 +2516,9 @@ class NURBSSurface(Surface):
         return self.degree_v
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        """
+        Exports the NURBS surface to an IGES entity
+        """
         return aerocaps.iges.surfaces.RationalBSplineSurfaceIGES(
             control_points=self.get_control_point_array(),
             knots_u=self.knots_u,
@@ -2526,6 +2529,14 @@ class NURBSSurface(Surface):
         )
 
     def get_control_point_array(self) -> np.ndarray:
+        r"""
+        Gets the control points in float array form.
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
         return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
 
     def get_homogeneous_control_points(self) -> np.ndarray:
@@ -2535,9 +2546,8 @@ class NURBSSurface(Surface):
         Returns
         -------
         numpy.ndarray
-            Array of size :math:`(n + 1) \times (m + 1) \times 4`,
-            where :math:`n` is the surface degree in the :math:`u`-direction and :math:`m` is the surface
-            degree in the :math:`v`-direction. The four elements of the last array dimension are, in order,
+            Array of size :math:`N_u \times N_v \times 4`.
+            The four elements of the last array dimension are, in order,
             the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
             control point.
         """
@@ -2547,8 +2557,27 @@ class NURBSSurface(Surface):
         ))
 
     @classmethod
-    def from_bezier_revolve(cls, bezier: Bezier3D, axis: Line3D, start_angle: Angle, end_angle: Angle):
+    def from_bezier_revolve(cls, bezier: Bezier3D, axis: Line3D,
+                            start_angle: Angle, end_angle: Angle) -> "NURBSSurface":
+        """
+        Creates a NURBS surface from the revolution of a Bézier curve about an axis.
 
+        Parameters
+        ----------
+        bezier: Bezier3D
+            Bézier curve to revolve
+        axis: Line3D
+            Axis of revolution
+        start_angle: Angle
+            Starting angle for the revolve
+        end_angle: Angle
+            Ending angle for the revolve
+
+        Returns
+        -------
+        NURBSSurface
+            Surface of revolution
+        """
         def _determine_angle_distribution() -> typing.List[Angle]:
             angle_diff = end_angle.rad - start_angle.rad
 
@@ -2607,8 +2636,6 @@ class NURBSSurface(Surface):
                 knots_v = np.insert(knots_v, 3 + idx, new_knot)
 
         knots_u = np.array([0.0 for _ in bezier.control_points] + [1.0 for _ in bezier.control_points])
-        degree_v = 2
-        degree_u = len(bezier.control_points) - 1
 
         return cls(control_points, knots_u, knots_v, weights)
 
