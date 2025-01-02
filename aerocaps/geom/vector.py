@@ -52,14 +52,14 @@ class Vector2D:
         return Length(m=np.sqrt(np.sum(self.as_array()**2)))
 
     def __mul__(self, other):
-        if isinstance(other, float):
+        if isinstance(other, float) or isinstance(other, int):
             return Vector2D.from_array(other * self.as_array())
-        raise NotImplementedError(f"Vector scaling is currently only implemented for float data")
+        raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
 
     def __rmul__(self, other):
-        if isinstance(other, float):
+        if isinstance(other, float) or isinstance(other, int):
             return Vector2D.from_array(other * self.as_array())
-        raise NotImplementedError(f"Vector scaling is currently only implemented for float data")
+        raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
 
 
 class Vector3D:
@@ -102,14 +102,14 @@ class Vector3D:
         return Length(m=np.sqrt(np.sum(self.as_array()**2)))
 
     def __mul__(self, other):
-        if isinstance(other, float):
-            return Vector3D.from_array(other * self.as_array())
-        raise NotImplementedError(f"Vector scaling is currently only implemented for float data")
+        if isinstance(other, float) or isinstance(other, int):
+            return Vector2D.from_array(other * self.as_array())
+        raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
 
     def __rmul__(self, other):
-        if isinstance(other, float):
-            return Vector3D.from_array(other * self.as_array())
-        raise NotImplementedError(f"Vector scaling is currently only implemented for float data")
+        if isinstance(other, float) or isinstance(other, int):
+            return Vector2D.from_array(other * self.as_array())
+        raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
 
 
 class IHat2D(Vector2D):
