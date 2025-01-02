@@ -103,12 +103,12 @@ class Vector3D:
 
     def __mul__(self, other):
         if isinstance(other, float) or isinstance(other, int):
-            return Vector2D.from_array(other * self.as_array())
+            return Vector3D.from_array(other * self.as_array())
         raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
 
     def __rmul__(self, other):
         if isinstance(other, float) or isinstance(other, int):
-            return Vector2D.from_array(other * self.as_array())
+            return Vector3D.from_array(other * self.as_array())
         raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
 
 
