@@ -2585,7 +2585,7 @@ class NURBSSurface(Surface):
             Surface of revolution
         """
         def _determine_angle_distribution() -> typing.List[Angle]:
-            angle_diff = end_angle.rad - start_angle.rad
+            angle_diff = abs(end_angle.rad - start_angle.rad)
 
             if angle_diff == 0.0:
                 raise InvalidGeometryError("Starting and ending angles cannot be the same for a "
