@@ -1102,7 +1102,7 @@ class BezierSurface(Surface):
 
     def split_at_u(self, u0: float) -> ("BezierSurface", "BezierSurface"):
         """
-        Splits the Bezier surface at :math:`u=u_0` along the :math:`v`-parametric direction.
+        Splits the Bézier surface at :math:`u=u_0` along the :math:`v`-parametric direction.
         """
         P = self.get_control_point_array()
 
@@ -1152,7 +1152,7 @@ class BezierSurface(Surface):
 
     def split_at_v(self, v0: float) -> ("BezierSurface", "BezierSurface"):
         """
-        Splits the Bezier surface at :math:`v=v_0` along the :math:`u`-parametric direction.
+        Splits the Bézier surface at :math:`v=v_0` along the :math:`u`-parametric direction.
         """
         P = self.get_control_point_array()
 
@@ -1193,7 +1193,15 @@ class BezierSurface(Surface):
         )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
+        """
+        Generates a list of :obj:`~aerocaps.geom.point.Point3D` and :obj:`~aerocaps.geom.curves.Line3D` objects
+        representing the Bézier surface's control points and connections between them
 
+        Returns
+        -------
+        typing.List[Point3D], typing.List[Line3D]
+            Control points and lines between adjacent control points in flattened lists
+        """
         points = []
         lines = []
         control_points = self.get_control_point_array()
@@ -1222,8 +1230,27 @@ class BezierSurface(Surface):
 
         return points, lines
 
-    def plot_surface(self, plot: pv.Plotter, **mesh_kwargs):
-        XYZ = self.evaluate(50, 50)
+    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs):
+        """
+        Plots the Bézier surface using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        Nu: int
+            Number of points to evaluate in the :math:`u`-parametric direction. Default: ``50``
+        Nv: int
+            Number of points to evaluate in the :math:`v`-parametric direction. Default: ``50``
+        mesh_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter` instance
+
+        Returns
+        -------
+        pyvista.core.pointset.StructuredGrid
+            The evaluated Bézier surface
+        """
+        XYZ = self.evaluate(Nu, Nv)
         grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
         plot.add_mesh(grid, **mesh_kwargs)
 
