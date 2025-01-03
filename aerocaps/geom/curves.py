@@ -920,14 +920,15 @@ class Bezier3D(PCurve3D):
 
 class NURBSCurve3D(Geometry3D):
     def __init__(self,
-                 control_points: np.ndarray,
+                 control_points: typing.List[Point3D] or np.ndarray,
                  weights: np.ndarray,
                  knot_vector: np.ndarray,
                  degree: int):
         """
         Non-uniform rational B-spline (NURBS) curve evaluation class
         """
-        assert control_points.ndim == 2
+        control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
+            control_points, np.ndarray) else control_points
         assert weights.ndim == 1
         assert knot_vector.ndim == 1
         assert len(knot_vector) == len(control_points) + degree + 1
@@ -939,7 +940,6 @@ class NURBSCurve3D(Geometry3D):
                 raise NegativeWeightError("All weights must be non-negative")
 
         self.control_points = control_points
-        self.dim = self.control_points.shape[1]
         self.weights = np.array(weights)
         self.knot_vector = np.array(knot_vector)
         self.degree = degree
@@ -949,22 +949,42 @@ class NURBSCurve3D(Geometry3D):
         return aerocaps.iges.curves.RationalBSplineCurveIGES(
             knots=self.knot_vector,
             weights=self.weights,
-            control_points_XYZ=self.control_points,
+            control_points_XYZ=self.get_control_point_array(),
             degree=self.degree
         )
 
     def reverse(self) -> "NURBSCurve3D":
-        return self.__class__(np.flipud(self.control_points),
+        return self.__class__(np.flipud(self.get_control_point_array()),
                               self.weights[::-1],
                               (1.0 - self.knot_vector)[::-1],
                               self.degree)
+
+    def get_control_point_array(self) -> np.ndarray:
+        return np.array([p.as_array() for p in self.control_points])
+
+    def get_homogeneous_control_points(self) -> np.ndarray:
+        r"""
+        Gets the array of control points in homogeneous coordinates, :math:`\mathbf{P}_i \cdot w_i`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n + 1) \times 4`, where :math:`n` is the curve degree. The four columns, in order,
+            represent the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
+            control point.
+        """
+        return np.column_stack((
+            self.get_control_point_array() * np.repeat(self.weights[:, np.newaxis], 3, axis=1),
+            self.weights
+        ))
 
     def evaluate_ndarray(self, t: float) -> np.ndarray:
         """
         Evaluate the NURBS curve at parameter t
         """
         B = self._basis_functions(t, self.degree)
-        point = np.dot(B * self.weights, self.control_points) / np.sum(B * self.weights)
+        P = self.get_control_point_array()
+        point = np.dot(B * self.weights, P) / np.sum(B * self.weights)
         return point
 
     def evaluate_simple(self, t: float) -> Point3D:

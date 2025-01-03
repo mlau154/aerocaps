@@ -22,6 +22,7 @@ from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_
 from aerocaps.geom.vector import Vector3D
 from aerocaps.units.angle import Angle
 from aerocaps.units.length import Length
+from aerocaps.utils.array import unique_with_tolerance
 from aerocaps.utils.math import bernstein_poly
 
 __all__ = [
@@ -1568,7 +1569,7 @@ class RationalBezierSurface(Surface):
             bottom_cps[0],
             bottom_cps[-1]
         ])
-        unique_corners = np.unique(corners, axis=0)
+        unique_corners = unique_with_tolerance(corners)
         if len(unique_corners) > 4:
             raise ValueError("Boundary curve loop is not closed")
 
