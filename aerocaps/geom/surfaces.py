@@ -1243,7 +1243,7 @@ class BezierSurface(Surface):
         Nv: int
             Number of points to evaluate in the :math:`v`-parametric direction. Default: ``50``
         mesh_kwargs:
-            Keyword arguments to pass to the :obj:`pyvista.Plotter` instance
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_mesh`
 
         Returns
         -------
@@ -1257,12 +1257,33 @@ class BezierSurface(Surface):
         return grid
 
     def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+        """
+        Plots the network of lines connecting the Bézier surface control points using the
+        `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        line_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+        """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
         plot.add_lines(line_arr, **line_kwargs)
 
     def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+        """
+        Plots the Bézier surface control points using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        point_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+        """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
         plot.add_points(point_arr, **point_kwargs)
