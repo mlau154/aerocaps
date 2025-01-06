@@ -1,0 +1,13 @@
+[package]
+name = "aerocaps"
+version = "0.0.4"
+edition = "2021"
+
+[lib]
+name = "rust_math"
+crate-type = ["cdylib"]
+path = "aerocaps/rust_math/src/lib.rs"
+
+[dependencies]
+pyo3 = "0.23.3"
+num-integer = "0.1.46"  # num_integer::binomial used in bernstein_poly
