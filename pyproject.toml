@@ -46,7 +46,7 @@ packages = [
     "aerocaps.examples",
     "aerocaps.geom",
     "aerocaps.iges",
-    "aerocaps.rust_math",
+    "aerocaps.rust",
     "aerocaps.scripts",
     "aerocaps.stl",
     "aerocaps.tests",

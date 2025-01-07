@@ -4,9 +4,9 @@ version = "0.0.4"
 edition = "2021"
 
 [lib]
-name = "rust_math"
+name = "rust_nurbs"
 crate-type = ["cdylib"]
-path = "aerocaps/rust_math/src/lib.rs"
+path = "aerocaps/rust/nurbs.rs"
 
 [dependencies]
 pyo3 = "0.23.3"
