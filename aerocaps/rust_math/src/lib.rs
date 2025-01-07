@@ -44,6 +44,31 @@ fn bezier_surf_eval(P: Vec<Vec<Vec<f64>>>, u: f64, v: f64) -> PyResult<Vec<f64>>
 }
 
 #[pyfunction]
+fn bezier_surf_eval_grid(P: Vec<Vec<Vec<f64>>>, Nu: usize, Nv: usize) -> PyResult<Vec<Vec<Vec<f64>>>> {
+    let n = P.len() - 1;  // Degree in the u-direction
+    let m = P[0].len() - 1;  // Degree in the v-direction
+    let dim = P[0][0].len();  // Number of spatial dimensions
+    let mut evaluated_points: Vec<Vec<Vec<f64>>> = vec![vec![vec![0.0; dim]; Nv]; Nu];
+    for u_idx in 0..Nu {
+        let u = (u_idx as f64) * 1.0 / (Nu as f64 - 1.0);
+        for v_idx in 0..Nv {
+            let v = (v_idx as f64) * 1.0 / (Nv as f64 - 1.0);
+            for i in 0..n+1 {
+                let b_poly_u = bernstein_poly_rust(n, i, u);
+                for j in 0..m+1 {
+                    let b_poly_v = bernstein_poly_rust(m, j, v);
+                    let b_poly_prod = b_poly_u * b_poly_v;
+                    for k in 0..dim {
+                        evaluated_points[u_idx][v_idx][k] += P[i][j][k] * b_poly_prod;
+                    }
+                }
+            }
+        }
+    }
+    Ok(evaluated_points)
+}
+
+#[pyfunction]
 fn rational_bezier_curve_eval(P: Vec<Vec<f64>>, w: Vec<f64>, t: f64) -> PyResult<Vec<f64>> {
     let n = P.len() - 1;
     let dim = P[0].len();
@@ -84,6 +109,37 @@ fn rational_bezier_surf_eval(P: Vec<Vec<Vec<f64>>>, w: Vec<Vec<f64>>, u: f64, v:
         evaluated_point[k] /= w_sum;
     }
     Ok(evaluated_point)
+}
+
+#[pyfunction]
+fn rational_bezier_surf_eval_grid(P: Vec<Vec<Vec<f64>>>, w: Vec<Vec<f64>>,
+    Nu: usize, Nv: usize) -> PyResult<Vec<Vec<Vec<f64>>>> {
+    let n = P.len() - 1;  // Degree in the u-direction
+    let m = P[0].len() - 1;  // Degree in the v-direction
+    let dim = P[0][0].len();  // Number of spatial dimensions
+    let mut evaluated_points: Vec<Vec<Vec<f64>>> = vec![vec![vec![0.0; dim]; Nv]; Nu];
+    for u_idx in 0..Nu {
+        let u = (u_idx as f64) * 1.0 / (Nu as f64 - 1.0);
+        for v_idx in 0..Nv {
+            let v = (v_idx as f64) * 1.0 / (Nv as f64 - 1.0);
+            let mut w_sum: f64 = 0.0;
+            for i in 0..n+1 {
+                let b_poly_u = bernstein_poly_rust(n, i, u);
+                for j in 0..m+1 {
+                    let b_poly_v = bernstein_poly_rust(m, j, v);
+                    let b_poly_prod = b_poly_u * b_poly_v;
+                    w_sum += w[i][j] * b_poly_prod;
+                    for k in 0..dim {
+                        evaluated_points[u_idx][v_idx][k] += P[i][j][k] * w[i][j] * b_poly_prod;
+                    }
+                }
+            }
+            for k in 0..dim {
+                evaluated_points[u_idx][v_idx][k] /= w_sum;
+            }
+        }
+    }
+    Ok(evaluated_points)
 }
 
 fn get_possible_span_indices(k: &[f64]) -> Vec<usize> {
@@ -187,6 +243,38 @@ fn bspline_surf_eval(P: Vec<Vec<Vec<f64>>>, ku: Vec<f64>, kv: Vec<f64>, u: f64, 
 }
 
 #[pyfunction]
+fn bspline_surf_eval_grid(P: Vec<Vec<Vec<f64>>>, ku: Vec<f64>, kv: Vec<f64>,
+    Nu: usize, Nv: usize) -> PyResult<Vec<Vec<Vec<f64>>>> {
+    let num_cps_u = P.len();  // Number of control points in the u-direction
+    let num_cps_v = P[0].len();  // Number of control points in the v-direction
+    let num_knots_u = ku.len();  // Number of knots in the u-direction
+    let num_knots_v = kv.len();  // Number of knots in the v-direction
+    let n = num_knots_u - num_cps_u - 1;  // Degree in the u-direction
+    let m = num_knots_v - num_cps_v - 1;  // Degree in the v-direction
+    let possible_span_indices_u = get_possible_span_indices(&ku);
+    let possible_span_indices_v = get_possible_span_indices(&kv);
+    let dim = P[0][0].len();  // Number of spatial dimensions
+    let mut evaluated_points: Vec<Vec<Vec<f64>>> = vec![vec![vec![0.0; dim]; Nv]; Nu];
+    for u_idx in 0..Nu {
+        let u = (u_idx as f64) * 1.0 / (Nu as f64 - 1.0);
+        for v_idx in 0..Nv {
+            let v = (v_idx as f64) * 1.0 / (Nv as f64 - 1.0);
+            for i in 0..num_cps_u {
+                let bspline_basis_u = cox_de_boor(&ku, &possible_span_indices_u, n, i, u);
+                for j in 0..num_cps_v {
+                    let bspline_basis_v = cox_de_boor(&kv, &possible_span_indices_v, m, j, v);
+                    let bspline_basis_prod = bspline_basis_u * bspline_basis_v;
+                    for k in 0..dim {
+                        evaluated_points[u_idx][v_idx][k] += P[i][j][k] * bspline_basis_prod;
+                    }
+                }
+            }
+        }
+    }
+    Ok(evaluated_points)
+}
+
+#[pyfunction]
 fn nurbs_curve_eval(P: Vec<Vec<f64>>, w: Vec<f64>, k: Vec<f64>, t: f64) -> PyResult<Vec<f64>> {
     let num_cps = P.len();
     let num_knots = k.len();
@@ -230,7 +318,7 @@ fn nurbs_surf_eval(P: Vec<Vec<Vec<f64>>>, w: Vec<Vec<f64>>,
             let bspline_basis_prod = bspline_basis_u * bspline_basis_v;
             w_sum += w[i][j] * bspline_basis_prod;
             for k in 0..dim {
-                evaluated_point[k] += P[i][j][k] * bspline_basis_prod;
+                evaluated_point[k] += P[i][j][k] * w[i][j] * bspline_basis_prod;
             }
         }
     }
@@ -240,17 +328,58 @@ fn nurbs_surf_eval(P: Vec<Vec<Vec<f64>>>, w: Vec<Vec<f64>>,
     Ok(evaluated_point)
 }
 
+#[pyfunction]
+fn nurbs_surf_eval_grid(P: Vec<Vec<Vec<f64>>>, w: Vec<Vec<f64>>,
+    ku: Vec<f64>, kv: Vec<f64>, Nu: usize, Nv: usize) -> PyResult<Vec<Vec<Vec<f64>>>> {
+    let num_cps_u = P.len();  // Number of control points in the u-direction
+    let num_cps_v = P[0].len();  // Number of control points in the v-direction
+    let num_knots_u = ku.len();  // Number of knots in the u-direction
+    let num_knots_v = kv.len();  // Number of knots in the v-direction
+    let n = num_knots_u - num_cps_u - 1;  // Degree in the u-direction
+    let m = num_knots_v - num_cps_v - 1;  // Degree in the v-direction
+    let possible_span_indices_u = get_possible_span_indices(&ku);
+    let possible_span_indices_v = get_possible_span_indices(&kv);
+    let dim = P[0][0].len();  // Number of spatial dimensions
+    let mut evaluated_points: Vec<Vec<Vec<f64>>> = vec![vec![vec![0.0; dim]; Nv]; Nu];
+    for u_idx in 0..Nu {
+        let u = (u_idx as f64) * 1.0 / (Nu as f64 - 1.0);
+        for v_idx in 0..Nv {
+            let v = (v_idx as f64) * 1.0 / (Nv as f64 - 1.0);
+            let mut w_sum: f64 = 0.0;
+            for i in 0..num_cps_u {
+                let bspline_basis_u = cox_de_boor(&ku, &possible_span_indices_u, n, i, u);
+                for j in 0..num_cps_v {
+                    let bspline_basis_v = cox_de_boor(&kv, &possible_span_indices_v, m, j, v);
+                    let bspline_basis_prod = bspline_basis_u * bspline_basis_v;
+                    w_sum += w[i][j] * bspline_basis_prod;
+                    for k in 0..dim {
+                        evaluated_points[u_idx][v_idx][k] += P[i][j][k] * w[i][j] * bspline_basis_prod;
+                    }
+                }
+            }
+            for k in 0..dim {
+                evaluated_points[u_idx][v_idx][k] /= w_sum;
+            }
+        }
+    }
+    Ok(evaluated_points)
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn rust_math(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bernstein_poly, m)?)?;
     m.add_function(wrap_pyfunction!(bezier_curve_eval, m)?)?;
     m.add_function(wrap_pyfunction!(bezier_surf_eval, m)?)?;
+    m.add_function(wrap_pyfunction!(bezier_surf_eval_grid, m)?)?;
     m.add_function(wrap_pyfunction!(rational_bezier_curve_eval, m)?)?;
     m.add_function(wrap_pyfunction!(rational_bezier_surf_eval, m)?)?;
+    m.add_function(wrap_pyfunction!(rational_bezier_surf_eval_grid, m)?)?;
     m.add_function(wrap_pyfunction!(bspline_curve_eval, m)?)?;
     m.add_function(wrap_pyfunction!(bspline_surf_eval, m)?)?;
+    m.add_function(wrap_pyfunction!(bspline_surf_eval_grid, m)?)?;
     m.add_function(wrap_pyfunction!(nurbs_curve_eval, m)?)?;
     m.add_function(wrap_pyfunction!(nurbs_surf_eval, m)?)?;
+    m.add_function(wrap_pyfunction!(nurbs_surf_eval_grid, m)?)?;
     Ok(())
 }
