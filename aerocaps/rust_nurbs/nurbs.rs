@@ -367,7 +367,7 @@ fn nurbs_surf_eval_grid(P: Vec<Vec<Vec<f64>>>, w: Vec<Vec<f64>>,
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn rust_math(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rust_nurbs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bernstein_poly, m)?)?;
     m.add_function(wrap_pyfunction!(bezier_curve_eval, m)?)?;
     m.add_function(wrap_pyfunction!(bezier_surf_eval, m)?)?;

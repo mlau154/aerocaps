@@ -6,7 +6,7 @@ edition = "2021"
 [lib]
 name = "rust_nurbs"
 crate-type = ["cdylib"]
-path = "aerocaps/rust/nurbs.rs"
+path = "aerocaps/rust_nurbs/nurbs.rs"
 
 [dependencies]
 pyo3 = "0.23.3"
