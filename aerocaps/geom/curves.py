@@ -13,6 +13,7 @@ from scipy.optimize import fsolve
 import aerocaps.iges
 import aerocaps.iges.curves
 import aerocaps.iges.entity
+from aerocaps.rust_nurbs import *
 from aerocaps.geom import Geometry2D, Geometry3D, NegativeWeightError
 from aerocaps.geom.point import Point2D, Point3D
 from aerocaps.geom.transformation import Transformation2D, Transformation3D

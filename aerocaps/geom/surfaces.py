@@ -14,6 +14,7 @@ import shapely
 import aerocaps.iges.entity
 import aerocaps.iges.curves
 import aerocaps.iges.surfaces
+from aerocaps.rust_nurbs import *
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
 from aerocaps.geom.point import Point3D
 from aerocaps.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
@@ -187,35 +188,6 @@ class BezierSurface(Surface):
         return cls([
             [Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in point_arr]
             for point_arr in P])
-
-    def evaluate_ndarray(self, u: float, v: float):
-        r"""
-        Evaluates the surface at a given :math:`(u,v)` parameter pair.
-
-        Parameters
-        ----------
-        u: float
-            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
-        v: float
-            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
-
-        Returns
-        -------
-        numpy.ndarray
-            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
-        """
-        P = self.get_control_point_array()
-
-        # Evaluate the surface
-        point = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                Bu = bernstein_poly(self.degree_u, i, u)
-                Bv = bernstein_poly(self.degree_v, j, v)
-                BuBv = Bu * Bv
-                point += P[i, j, :] * BuBv
-
-        return point
 
     def dSdu(self, u: float, v: float):
         r"""
@@ -534,7 +506,26 @@ class BezierSurface(Surface):
                     continue
                 assert np.isclose(dxdydz_ratio, current_f)
 
-    def evaluate_simple(self, u: float, v: float) -> Point3D:
+    def evaluate_ndarray(self, u: float, v: float):
+        r"""
+        Evaluates the surface at a given :math:`(u,v)` parameter pair.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        numpy.ndarray
+            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_eval(P, u, v))
+
+    def evaluate_point3d(self, u: float, v: float) -> Point3D:
         r"""
         Evaluates the Bézier surface at a single :math:`(u,v)` parameter pair and returns a point object.
 
@@ -552,7 +543,7 @@ class BezierSurface(Surface):
         """
         return Point3D.from_array(self.evaluate_ndarray(u, v))
 
-    def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
+    def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
         r"""
         Evaluates the Bézier surface on a uniform :math:`N_u \times N_v` grid of parameter values.
 
@@ -568,10 +559,8 @@ class BezierSurface(Surface):
         numpy.ndarray
             Array of size :math:`N_u \times N_v \times 3`
         """
-        U, V = np.meshgrid(np.linspace(0.0, 1.0, Nu), np.linspace(0.0, 1.0, Nv))
-        return np.array(
-            [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])]
-        )
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_eval_grid(P, Nu, Nv))
 
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> Bezier3D:
         """
@@ -1657,30 +1646,16 @@ class RationalBezierSurface(Surface):
 
         return RationalBezierSurface.generate_from_array(new_points, new_weights)
 
-    def evaluate_ndarray(self, u: float, v: float):
+    def evaluate(self, u: float, v: float) -> np.ndarray:
         P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_eval(P, self.weights, u, v))
 
-        # Evaluate the surface
-        point = np.zeros(P.shape[2])
-        wBuBv_sum = 0.0
-        for i in range(self.Nu):
-            for j in range(self.Nv):
-                Bu = bernstein_poly(self.degree_u, i, u)
-                Bv = bernstein_poly(self.degree_v, j, v)
-                wBuBv = Bu * Bv * self.weights[i, j]
-                wBuBv_sum += wBuBv
-                point += P[i, j, :] * wBuBv
+    def evaluate_point3d(self, u: float, v: float) -> Point3D:
+        return Point3D.from_array(self.evaluate(u, v))
 
-        return point / wBuBv_sum
-
-    def evaluate_simple(self, u: float, v: float) -> Point3D:
-        return Point3D.from_array(self.evaluate_ndarray(u, v))
-
-    def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
-        U, V = np.meshgrid(np.linspace(0.0, 1.0, Nu), np.linspace(0.0, 1.0, Nv))
-        return np.array(
-            [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])]
-        )
+    def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_eval_grid(P, self.weights, Nu, Nv))
 
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> RationalBezierCurve3D:
         P = self.get_control_point_array()
@@ -2694,90 +2669,16 @@ class NURBSSurface(Surface):
 
         return cls(control_points, knots_u, knots_v, weights)
 
-    @staticmethod
-    def _get_possible_spans(knot_vector) -> (np.ndarray, np.ndarray):
-        possible_span_indices = np.array([], dtype=int)
-        possible_spans = []
-        for knot_idx, (knot_1, knot_2) in enumerate(zip(knot_vector[:-1], knot_vector[1:])):
-            if knot_1 == knot_2:
-                continue
-            possible_span_indices = np.append(possible_span_indices, knot_idx)
-            possible_spans.append([knot_1, knot_2])
-        return np.array(possible_spans), possible_span_indices
-
-    def _cox_de_boor(self, t: float, i: int, p: int, knot_vector: np.ndarray,
-                     possible_spans_u_or_v: np.ndarray, possible_span_indices_u_or_v: np.ndarray) -> float:
-        if p == 0:
-            return 1.0 if i in possible_span_indices_u_or_v and self._find_span(
-                t, possible_spans_u_or_v, possible_span_indices_u_or_v) == i else 0.0
-        else:
-            with (np.errstate(divide="ignore", invalid="ignore")):
-                f = (t - knot_vector[i]) / (knot_vector[i + p] - knot_vector[i])
-                g = (knot_vector[i + p + 1] - t) / (knot_vector[i + p + 1] - knot_vector[i + 1])
-                if np.isinf(f) or np.isnan(f):
-                    f = 0.0
-                if np.isinf(g) or np.isnan(g):
-                    g = 0.0
-                if f == 0.0 and g == 0.0:
-                    return 0.0
-                elif f != 0.0 and g == 0.0:
-                    return f * self._cox_de_boor(t, i, p - 1, knot_vector,
-                                                 possible_spans_u_or_v, possible_span_indices_u_or_v)
-                elif f == 0.0 and g != 0.0:
-                    return g * self._cox_de_boor(t, i + 1, p - 1, knot_vector,
-                                                 possible_spans_u_or_v, possible_span_indices_u_or_v)
-                else:
-                    return f * self._cox_de_boor(t, i, p - 1, knot_vector,
-                                                 possible_spans_u_or_v, possible_span_indices_u_or_v) + \
-                        g * self._cox_de_boor(t, i + 1, p - 1, knot_vector,
-                                              possible_spans_u_or_v, possible_span_indices_u_or_v)
-
-    def _basis_functions(self, t: float, p: int, knot_vector: np.ndarray, n_control_points_u_or_v: int,
-                         possible_spans_u_or_v: np.ndarray, possible_span_indices_u_or_v: np.ndarray):
-        """
-        Compute the non-zero basis functions at parameter t
-        """
-        return np.array(
-            [self._cox_de_boor(t, i, p, knot_vector, possible_spans_u_or_v, possible_span_indices_u_or_v) for i in
-             range(n_control_points_u_or_v)])
-
-    @staticmethod
-    def _find_span(t: float, possible_spans_u_or_v: np.ndarray, possible_span_indices_u_or_v: np.ndarray):
-        """
-        Find the knot span index
-        """
-        # insertion_point = bisect.bisect_left(self.non_repeated_knots, t)
-        # return self.possible_spans[insertion_point - 1]
-        for knot_span, knot_span_idx in zip(possible_spans_u_or_v, possible_span_indices_u_or_v):
-            if knot_span[0] <= t < knot_span[1]:
-                return knot_span_idx
-        if t == possible_spans_u_or_v[-1][1]:
-            return possible_span_indices_u_or_v[-1]
-
-    def evaluate_ndarray(self, u: float, v: float) -> np.ndarray:
+    def evaluate(self, u: float, v: float) -> np.ndarray:
         P = self.get_control_point_array()
-        Bu = self._basis_functions(u, self.degree_u, self.knots_u, self.Nu,
-                                   self.possible_spans_u, self.possible_span_indices_u)
-        Bv = self._basis_functions(v, self.degree_v, self.knots_v, self.Nv,
-                                   self.possible_spans_v, self.possible_span_indices_v)
+        return np.array(nurbs_surf_eval(P, self.weights, self.knots_u, self.knots_v, u, v))
 
-        weighted_cps = np.zeros(P.shape[2])
-        denominator = 0.0
-
-        for i in range(self.Nu):
-            for j in range(self.Nv):
-                weighted_cps += P[i][j] * Bu[i] * Bv[j] * self.weights[i][j]
-                denominator += Bu[i] * Bv[j] * self.weights[i][j]
-
-        return weighted_cps / denominator
-
-    def evaluate_simple(self, u: float, v: float) -> Point3D:
+    def evaluate_point3d(self, u: float, v: float) -> Point3D:
         return Point3D.from_array(self.evaluate_ndarray(u, v))
 
-    def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
-        U, V = np.meshgrid(np.linspace(0.0, 1.0, Nu), np.linspace(0.0, 1.0, Nv))
-        return np.array(
-            [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])])
+    def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_eval_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
 
     def get_parallel_control_point_length(self, surface_edge: SurfaceEdge) -> int:
         r"""
