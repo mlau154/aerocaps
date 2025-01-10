@@ -3,6 +3,7 @@ Parametric surface classes (two-dimensional geometric objects defined by paramet
 that reside in three-dimensional space)
 """
 import typing
+import warnings
 from copy import deepcopy
 from enum import Enum
 
@@ -14,7 +15,12 @@ import shapely
 import aerocaps.iges.entity
 import aerocaps.iges.curves
 import aerocaps.iges.surfaces
-from aerocaps.rust_nurbs import *
+try:
+    from rust_nurbs import *
+except ImportError:
+    warnings.warn("Failed to import 'rust_nurbs' library (requires installation with 'pip install aerocaps[rust]'. "
+                  "Falling back to built-in pure-Python NURBS library.")
+    from aerocaps.geom.nurbs_purepython import *
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
 from aerocaps.geom.point import Point3D
 from aerocaps.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
@@ -328,13 +334,13 @@ class BezierSurface(Surface):
             2-D array of size :math:`n_\text{points} \times 3`
         """
         if edge == SurfaceEdge.v1:
-            return np.array([self.evaluate_ndarray(u, 1) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate(u, 1) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.v0:
-            return np.array([self.evaluate_ndarray(u, 0) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate(u, 0) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.u1:
-            return np.array([self.evaluate_ndarray(1, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate(1, v) for v in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.u0:
-            return np.array([self.evaluate_ndarray(0, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate(0, v) for v in np.linspace(0.0, 1.0, n_points)])
         else:
             raise ValueError(f"No edge called {edge}")
 
@@ -506,7 +512,7 @@ class BezierSurface(Surface):
                     continue
                 assert np.isclose(dxdydz_ratio, current_f)
 
-    def evaluate_ndarray(self, u: float, v: float):
+    def evaluate(self, u: float, v: float):
         r"""
         Evaluates the surface at a given :math:`(u,v)` parameter pair.
 
@@ -541,7 +547,7 @@ class BezierSurface(Surface):
         Point3D
             Point object corresponding to the :math:`(u,v)` pair
         """
-        return Point3D.from_array(self.evaluate_ndarray(u, v))
+        return Point3D.from_array(self.evaluate(u, v))
 
     def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
         r"""
@@ -676,7 +682,7 @@ class BezierSurface(Surface):
             of the points evaluated along the isoparametric curve
         """
         u_vec = np.linspace(0.0, 1.0, Nu)
-        return np.array([self.evaluate_ndarray(u, v) for u in u_vec])
+        return np.array([self.evaluate(u, v) for u in u_vec])
 
     def extract_isoparametric_curve_v(self, Nv: int, u: float) -> np.ndarray:
         r"""
@@ -696,7 +702,7 @@ class BezierSurface(Surface):
             of the points evaluated along the isoparametric curve
         """
         v_vec = np.linspace(0.0, 1.0, Nv)
-        return np.array([self.evaluate_ndarray(u, v) for v in v_vec])
+        return np.array([self.evaluate(u, v) for v in v_vec])
 
     def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
         r"""
@@ -1077,11 +1083,11 @@ class BezierSurface(Surface):
             raise ValueError("Did not detect an x, y, or z input")
 
         def root_find_func_u(u_current):
-            point = self.evaluate_simple(u_current, v)
+            point = self.evaluate_point3d(u_current, v)
             return np.array([getattr(point, xyz).m - xyz_val])
 
         def root_find_func_v(v_current):
-            point = self.evaluate_simple(u, v_current)
+            point = self.evaluate_point3d(u, v_current)
             return np.array([getattr(point, xyz).m - xyz_val])
 
         if v is not None:
@@ -1240,7 +1246,7 @@ class BezierSurface(Surface):
         pyvista.core.pointset.StructuredGrid
             The evaluated Bézier surface
         """
-        XYZ = self.evaluate(Nu, Nv)
+        XYZ = self.evaluate_grid(Nu, Nv)
         grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
         plot.add_mesh(grid, **mesh_kwargs)
 
@@ -2071,13 +2077,13 @@ class RationalBezierSurface(Surface):
 
     def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
         if edge == SurfaceEdge.v1:
-            return np.array([self.evaluate_ndarray(u, 1.0) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate(u, 1.0) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.v0:
-            return np.array([self.evaluate_ndarray(u, 0.0) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate(u, 0.0) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.u1:
-            return np.array([self.evaluate_ndarray(1.0, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate(1.0, v) for v in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.u0:
-            return np.array([self.evaluate_ndarray(0.0, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array([self.evaluate(0.0, v) for v in np.linspace(0.0, 1.0, n_points)])
         else:
             raise ValueError(f"No edge called {edge}")
 
@@ -2292,11 +2298,11 @@ class RationalBezierSurface(Surface):
             raise ValueError("Did not detect an x, y, or z input")
 
         def root_find_func_u(u_current):
-            point = self.evaluate_simple(u_current, v)
+            point = self.evaluate_point3d(u_current, v)
             return np.array([getattr(point, xyz).m - xyz_val])
 
         def root_find_func_v(v_current):
-            point = self.evaluate_simple(u, v_current)
+            point = self.evaluate_point3d(u, v_current)
             return np.array([getattr(point, xyz).m - xyz_val])
 
         if v is not None:
@@ -2429,7 +2435,7 @@ class RationalBezierSurface(Surface):
         return points, lines
 
     def plot_surface(self, plot: pv.Plotter, **mesh_kwargs):
-        XYZ = self.evaluate(50, 50)
+        XYZ = self.evaluate_grid(50, 50)
         grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
         plot.add_mesh(grid, **mesh_kwargs)
         return grid
@@ -2474,8 +2480,6 @@ class NURBSSurface(Surface):
         self.knots_u = knots_u
         self.knots_v = knots_v
         self.weights = weights
-        self.possible_spans_u, self.possible_span_indices_u = self._get_possible_spans(self.knots_u)
-        self.possible_spans_v, self.possible_span_indices_v = self._get_possible_spans(self.knots_v)
 
     @property
     def Nu(self) -> int:
@@ -3048,7 +3052,7 @@ class NURBSSurface(Surface):
         return points, lines
 
     def plot_surface(self, plot: pv.Plotter, **mesh_kwargs):
-        XYZ = self.evaluate(50, 50)
+        XYZ = self.evaluate_grid(50, 50)
         grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
         plot.add_mesh(grid, **mesh_kwargs)
         return grid

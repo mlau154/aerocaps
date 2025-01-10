@@ -11,7 +11,6 @@ from .geom.vector import *
 from .units.area import *
 from .units.length import *
 from .units.angle import *
-from .rust_nurbs import *
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_DIR = os.path.join(BASE_DIR, "tests")

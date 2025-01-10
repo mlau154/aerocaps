@@ -1,6 +1,6 @@
 [build-system]
-requires = ["maturin>=1.8,<2.0"]
-build-backend = "maturin"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "aerocaps"
@@ -40,13 +40,17 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+rust = [
+    "rust-nurbs"
+]
+
 [tool.setuptools]
 packages = [
     "aerocaps",
     "aerocaps.examples",
     "aerocaps.geom",
     "aerocaps.iges",
-    "aerocaps.rust_nurbs",
     "aerocaps.scripts",
     "aerocaps.stl",
     "aerocaps.tests",
@@ -56,6 +60,3 @@ packages = [
 
 [tool.setuptools.dynamic]
 version = {attr = "aerocaps.version.__version__"}
-
-[tool.maturin]
-features = ["pyo3/extension-module"]
