@@ -6,7 +6,7 @@ from aerocaps.examples.bezier_surface import bezier_surface_2x3
 from aerocaps.iges.iges_generator import IGESGenerator
 
 
-def one_edge():
+def test_one_edge():
     surf_1 = bezier_surface_2x3()
     points = np.array([
         [
@@ -122,4 +122,4 @@ def one_edge():
 
 
 if __name__ == "__main__":
-    one_edge()
+    test_one_edge()

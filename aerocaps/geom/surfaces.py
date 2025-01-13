@@ -195,7 +195,7 @@ class BezierSurface(Surface):
             [Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in point_arr]
             for point_arr in P])
 
-    def dSdu(self, u: float, v: float):
+    def dSdu(self, u: float, v: float) -> np.ndarray:
         r"""
         Evaluates the first derivative of the surface in the :math:`u`-direction,
         :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}`, at a given :math:`(u,v)` parameter pair.
@@ -214,17 +214,9 @@ class BezierSurface(Surface):
             and :math:`z`-components of :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}`
         """
         P = self.get_control_point_array()
-        deriv_u = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                dbudu = self.degree_u * (bernstein_poly(self.degree_u - 1, i - 1, u) - bernstein_poly(
-                    self.degree_u - 1, i, u))
-                bv = bernstein_poly(self.degree_v, j, v)
-                dbudu_bv = dbudu * bv
-                deriv_u += P[i, j, :] * dbudu_bv
-        return deriv_u
+        return np.array(bezier_surf_dsdu(P, u, v))
 
-    def dSdv(self, u: float, v: float):
+    def dSdv(self, u: float, v: float) -> np.ndarray:
         r"""
         Evaluates the first derivative of the surface in the :math:`v`-direction,
         :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}`, at a given :math:`(u,v)` parameter pair.
@@ -243,17 +235,9 @@ class BezierSurface(Surface):
             and :math:`z`-components of :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}`
         """
         P = self.get_control_point_array()
-        deriv_v = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                dbvdv = self.degree_v * (bernstein_poly(self.degree_v - 1, j - 1, v) - bernstein_poly(
-                    self.degree_v - 1, j, v))
-                bu = bernstein_poly(self.degree_u, i, u)
-                bu_dbvdv = bu * dbvdv
-                deriv_v += P[i, j, :] * bu_dbvdv
-        return deriv_v
+        return np.array(bezier_surf_dsdv(P, u, v))
 
-    def d2Sdu2(self, u: float, v: float):
+    def d2Sdu2(self, u: float, v: float) -> np.ndarray:
         r"""
         Evaluates the second pure derivative of the surface in the :math:`u`-direction,
         :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}`, at a given :math:`(u,v)` parameter pair.
@@ -272,20 +256,9 @@ class BezierSurface(Surface):
             and :math:`z`-components of :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}`
         """
         P = self.get_control_point_array()
-        deriv_u_2 = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                term_1 = self.degree_u * (self.degree_u - 1) * (
-                        bernstein_poly(self.degree_u - 2, i - 2, u) - bernstein_poly(self.degree_u - 2, i - 1, u))
-                term_2 = self.degree_u * (self.degree_u - 1) * (
-                        bernstein_poly(self.degree_u - 2, i - 1, u) - bernstein_poly(self.degree_u - 2, i, u))
-                d2budu2 = term_1 - term_2
-                Bv = bernstein_poly(self.degree_v, j, v)
-                d2budu2_Bv = d2budu2 * Bv
-                deriv_u_2 += P[i, j, :] * d2budu2_Bv
-        return deriv_u_2
+        return np.array(bezier_surf_d2sdu2(P, u, v))
 
-    def d2Sdv2(self, u: float, v: float):
+    def d2Sdv2(self, u: float, v: float) -> np.ndarray:
         r"""
         Evaluates the second pure derivative of the surface in the :math:`v`-direction,
         :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}`, at a given :math:`(u,v)` parameter pair.
@@ -304,18 +277,7 @@ class BezierSurface(Surface):
             and :math:`z`-components of :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}`
         """
         P = self.get_control_point_array()
-        deriv_v_2 = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                term1 = self.degree_v * (self.degree_v - 1) * (
-                            bernstein_poly(self.degree_v - 2, j - 2, v) - bernstein_poly(self.degree_v - 2, j - 1, v))
-                term2 = self.degree_v * (self.degree_v - 1) * (
-                            bernstein_poly(self.degree_v - 2, j - 1, v) - bernstein_poly(self.degree_v - 2, j, v))
-                d2bvdv2 = term1 - term2
-                Bu = bernstein_poly(self.degree_u, i, u)
-                Bu_d2bvdv2 = Bu * d2bvdv2
-                deriv_v_2 += P[i, j, :] * Bu_d2bvdv2
-        return deriv_v_2
+        return np.array(bezier_surf_d2sdv2(P, u, v))
 
     def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
         r"""
@@ -333,14 +295,15 @@ class BezierSurface(Surface):
         numpy.ndarray
             2-D array of size :math:`n_\text{points} \times 3`
         """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([self.evaluate(u, 1) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_eval_iso_v(P, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([self.evaluate(u, 0) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_eval_iso_v(P, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([self.evaluate(1, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_eval_iso_u(P, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([self.evaluate(0, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_eval_iso_u(P, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
@@ -366,18 +329,19 @@ class BezierSurface(Surface):
         numpy.ndarray
             2-D array of size :math:`n_\text{points} \times 3`
         """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([(self.dSdv(u, 1.0) if perp else
-                              self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_dsdv_iso_v(P, n_points, 1.0)) if perp else np.array(
+                bezier_surf_dsdu_iso_v(P, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([(self.dSdv(u, 0.0) if perp else
-                              self.dSdu(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_dsdv_iso_v(P, n_points, 0.0)) if perp else np.array(
+                bezier_surf_dsdu_iso_v(P, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([(self.dSdu(1.0, v) if perp else
-                              self.dSdv(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_dsdu_iso_u(P, 1.0, n_points)) if perp else np.array(
+                bezier_surf_dsdv_iso_u(P, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([(self.dSdu(0.0, v) if perp else
-                              self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_dsdu_iso_u(P, 0.0, n_points)) if perp else np.array(
+                bezier_surf_dsdv_iso_u(P, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
@@ -403,18 +367,19 @@ class BezierSurface(Surface):
         numpy.ndarray
             2-D array of size :math:`n_\text{points} \times 3`
         """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([(self.d2Sdv2(u, 1.0) if perp else
-                              self.d2Sdu2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_d2sdv2_iso_v(P, n_points, 1.0)) if perp else np.array(
+                bezier_surf_d2sdu2_iso_v(P, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([(self.d2Sdv2(u, 0.0) if perp else
-                              self.d2Sdu2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_d2sdv2_iso_v(P, n_points, 0.0)) if perp else np.array(
+                bezier_surf_d2sdu2_iso_v(P, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([(self.d2Sdu2(1.0, v) if perp else
-                              self.d2Sdv2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_d2sdu2_iso_u(P, 1.0, n_points)) if perp else np.array(
+                bezier_surf_d2sdv2_iso_u(P, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([(self.d2Sdu2(0.0, v) if perp else
-                              self.d2Sdv2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_d2sdu2_iso_u(P, 0.0, n_points)) if perp else np.array(
+                bezier_surf_d2sdv2_iso_u(P, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
