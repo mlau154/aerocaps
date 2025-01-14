@@ -15,12 +15,7 @@ import shapely
 import aerocaps.iges.entity
 import aerocaps.iges.curves
 import aerocaps.iges.surfaces
-try:
-    from rust_nurbs import *
-except ImportError:
-    warnings.warn("Failed to import 'rust_nurbs' library (requires installation with 'pip install aerocaps[rust]'. "
-                  "Falling back to built-in pure-Python NURBS library.")
-    from aerocaps.geom.nurbs_purepython import *
+from rust_nurbs import *
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
 from aerocaps.geom.point import Point3D
 from aerocaps.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D

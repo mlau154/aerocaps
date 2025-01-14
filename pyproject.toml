@@ -36,14 +36,10 @@ dependencies = [
     "matplotlib",
     "pyvista",
     "pyiges",
-    "shapely"
-]
-dynamic = ["version"]
-
-[project.optional-dependencies]
-rust = [
+    "shapely",
     "rust-nurbs"
 ]
+dynamic = ["version"]
 
 [tool.setuptools]
 packages = [
