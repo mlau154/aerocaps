@@ -24,8 +24,8 @@ except ImportError:
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
 from aerocaps.geom.point import Point3D
 from aerocaps.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
-import aerocaps
-from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis
+from aerocaps.geom.plane import Plane
+from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis, add_vector_to_point
 from aerocaps.geom.vector import Vector3D
 from aerocaps.units.angle import Angle
 from aerocaps.units.length import Length
@@ -194,6 +194,41 @@ class BezierSurface(Surface):
         return cls([
             [Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in point_arr]
             for point_arr in P])
+
+    @classmethod
+    def from_curve_extrude(cls, curve: Bezier3D, distance: Length, extrude_axis: Vector3D = None,
+                           symmetric: bool = False, reverse: bool = False):
+        # Input validation
+        if curve.degree < 2 and extrude_axis is None:
+            raise ValueError("For linear Bézier curves (those with only two control points), "
+                             "the 'extrude_axis` argument must be specified")
+
+        # Get the axis along which to extrude
+        if extrude_axis is None:
+            plane = Plane(p0=curve.control_points[0], p1=curve.control_points[1], p2=curve.control_points[-1])
+            extrude_axis = plane.compute_normal()
+        else:
+            extrude_axis = extrude_axis.get_normalized_vector()
+
+        # Get the scaled extrusion vectors
+        extrude_vec_forward = extrude_axis.scale(0.5 if symmetric else 1.0 * distance.m)
+        extrude_vec_backward = extrude_axis.scale(0.5 if symmetric else 1.0 * distance.m)
+
+        # Get the start and end point lists for the surface
+        if symmetric:
+            start_points = [add_vector_to_point(extrude_vec_forward, p) for p in curve.control_points]
+            end_points = [add_vector_to_point(extrude_vec_backward, p) for p in curve.control_points]
+        else:
+            start_points = curve.control_points
+            if reverse:
+                end_points = [add_vector_to_point(extrude_vec_backward, p) for p in curve.control_points]
+            else:
+                end_points = [add_vector_to_point(extrude_vec_forward, p) for p in curve.control_points]
+
+        # Create the extruded surface
+        surf = cls([start_points, end_points])
+
+        return surf
 
     def dSdu(self, u: float, v: float) -> np.ndarray:
         r"""
@@ -1204,7 +1239,7 @@ class BezierSurface(Surface):
         Nv: int
             Number of points to evaluate in the :math:`v`-parametric direction. Default: ``50``
         mesh_kwargs:
-            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_mesh`
+            Keyword arguments to pass to :obj:`pyvista.Plotter.add_mesh`
 
         Returns
         -------
