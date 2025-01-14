@@ -563,6 +563,25 @@ class BezierSurface(Surface):
         P = self.get_control_point_array()
         return np.array(bezier_surf_eval_grid(P, Nu, Nv))
 
+    def evaluate_uvvecs(self, u: np.ndarray, v: np.ndarray) -> np.ndarray:
+        r"""
+        Evaluates the Bézier surface at arbitrary vectors of :math:`u` and :math:`v`values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_eval_uvvecs(P, u, v))
+
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> Bezier3D:
         """
         Extracts the control points from one of the four edges of the Bézier surface and outputs a Bézier curve with
@@ -659,7 +678,27 @@ class BezierSurface(Surface):
 
         return BezierSurface.generate_from_array(new_control_points)
 
-    def extract_isoparametric_curve_u(self, Nu: int, v: float) -> np.ndarray:
+    def extract_isoparametric_curve_u(self, u: float, Nv: int) -> np.ndarray:
+        r"""
+        Extracts a curve along the :math:`v`-direction at a fixed value of :math:`u`
+
+        Parameters
+        ----------
+        u: float
+            Constant value of :math:`u`
+        Nv: int
+            Number of points to evaluate, linearly spaced in :math:`v`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_v \times 3` representing the :math:`x`-, :math:`y`-, and :math:`z`-coordinates
+            of the points evaluated along the isoparametric curve
+        """
+        v_vec = np.linspace(0.0, 1.0, Nv)
+        return np.array([self.evaluate(u, v) for v in v_vec])
+
+    def extract_isoparametric_curve_v(self, Nu: int, v: float) -> np.ndarray:
         r"""
         Extracts a curve along the :math:`u`-direction at a fixed value of :math:`v`
 
@@ -676,28 +715,8 @@ class BezierSurface(Surface):
             Array of size :math:`N_u \times 3` representing the :math:`x`-, :math:`y`-, and :math:`z`-coordinates
             of the points evaluated along the isoparametric curve
         """
-        u_vec = np.linspace(0.0, 1.0, Nu)
-        return np.array([self.evaluate(u, v) for u in u_vec])
-
-    def extract_isoparametric_curve_v(self, Nv: int, u: float) -> np.ndarray:
-        r"""
-        Extracts a curve along the :math:`v`-direction at a fixed value of :math:`u`
-
-        Parameters
-        ----------
-        Nv: int
-            Number of points to evaluate, linearly spaced in :math:`u`
-        u: float
-            Constant value of :math:`v`
-
-        Returns
-        -------
-        numpy.ndarray
-            Array of size :math:`N_v \times 3` representing the :math:`x`-, :math:`y`-, and :math:`z`-coordinates
-            of the points evaluated along the isoparametric curve
-        """
-        v_vec = np.linspace(0.0, 1.0, Nv)
-        return np.array([self.evaluate(u, v) for v in v_vec])
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_eval_iso_v(P, Nu, v))
 
     def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
         r"""

@@ -1,7 +1,10 @@
 """
-Pure-python implementation of NURBS evaluation (no ``numpy``). The functions in this module are purely
-for comparison purposes and should not be used in actual code since faster versions are available
-(:ref:`~aerocaps.geom.nurbs_numpy`: built-in, faster; :ref:`~rust_nurbs`: third-party, fastest).
+Pure-python implementation of NURBS evaluation (no :obj:`numpy`).
+
+.. warning::
+
+    The functions in this module are purely for comparison purposes and calling of these functions from higher-level
+    functions or methods is discouraged since the much faster :obj:`rust_nurbs` library is available.
 """
 from decimal import Decimal
 from math import factorial
