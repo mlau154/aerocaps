@@ -100,10 +100,10 @@ class BezierSurface(Surface):
             A :math:`2 \times 3` Bézier surface with isoparametric curves in both :math:`u` and :math:`v` shown
 
         Bézier surfaces can be constructed either via the default constructor with a nested list of
-        ``aerocaps.geom.point.Point3D`` objects of by means of the ``generate_from_array`` class method where only a
-        3-D ``numpy`` array is required. For example, say we have six ``Point3D`` objects, A-F and would like to use
+        ``aerocaps.geom.point.Point3D`` objects of by a
+        3-D ``numpy`` array. For example, say we have six ``Point3D`` objects, A-F and would like to use
         them to create a :math:`2 \times 1` Bézier surface.
-        Using the default constructor,
+        Using the default constructor with the point objects,
 
         .. code-block:: python
 
@@ -119,7 +119,7 @@ class BezierSurface(Surface):
                 [[pE_x, pE_y, pE_z], [pF_x, pF_y, pF_z]],
             ])
 
-            surf = BezierSurface.generate_from_array(control_points)
+            surf = BezierSurface(control_points)
 
         Parameters
         ----------
@@ -165,27 +165,6 @@ class BezierSurface(Surface):
             3-D array
         """
         return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
-
-    @classmethod
-    def generate_from_array(cls, P: np.ndarray):
-        r"""
-        Creates a new Bézier surface from a 3-D :obj:`~numpy.ndarray`.
-
-        Parameters
-        ----------
-        P: numpy.ndarray
-            Array of control points of size :math:`(n+1) \times (m+1) \times 3`, where :math:`n` is the surface
-            degree in the :math:`u`-parametric direction and :math:`m` is the surface degree in the
-            :math:`v`-parametric direction
-
-        Returns
-        -------
-        BezierSurface
-            New Bézier surface created from the input control points
-        """
-        return cls([
-            [Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in point_arr]
-            for point_arr in P])
 
     @classmethod
     def from_curve_extrude(cls, curve: Bezier3D, distance: Length, extrude_axis: Vector3D = None,
@@ -817,7 +796,7 @@ class BezierSurface(Surface):
             for j in range(0, m + 1):  # for all j
                 new_control_points[i, j, :] = i / (n + 1) * P[i - 1, j, :] + (1 - i / (n + 1)) * P[i, j, :]
 
-        return BezierSurface.generate_from_array(new_control_points)
+        return BezierSurface(new_control_points)
 
     def elevate_degree_v(self) -> "BezierSurface":
         r"""
@@ -851,7 +830,7 @@ class BezierSurface(Surface):
             for j in range(1, m + 1):  # 1 <= j <= m
                 new_control_points[i, j, :] = j / (m + 1) * P[i, j - 1, :] + (1 - j / (m + 1)) * P[i, j, :]
 
-        return BezierSurface.generate_from_array(new_control_points)
+        return BezierSurface(new_control_points)
 
     def extract_isoparametric_curve_u(self, u: float, Nv: int) -> np.ndarray:
         r"""
@@ -993,7 +972,7 @@ class BezierSurface(Surface):
         .. code-block:: python
 
             p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
-            surf.get_point(p, 2, 1, ac.SurfaceEdge.u1)
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.u1)
 
         sets the value of point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` to :math:`[3,4,5]^T`.
 
@@ -1194,7 +1173,6 @@ class BezierSurface(Surface):
             self.set_point(P_i2_b, row_index, 2, surface_edge)
 
     def enforce_c0c1c2(self, other: "BezierSurface",
-
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
         r"""
         Equivalent to calling :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0g1g2` with ``f=1.0``. See that
@@ -1323,12 +1301,12 @@ class BezierSurface(Surface):
         ])
 
         return (
-            BezierSurface.generate_from_array(
+            BezierSurface(
                 np.transpose(
                     bez_surf_split_1_P, (1, 0, 2)
                 )
             ),
-            BezierSurface.generate_from_array(
+            BezierSurface(
                 np.transpose(
                     bez_surf_split_2_P, (1, 0, 2)
                 )
@@ -1373,8 +1351,8 @@ class BezierSurface(Surface):
         ])
 
         return (
-            BezierSurface.generate_from_array(bez_surf_split_1_P),
-            BezierSurface.generate_from_array(bez_surf_split_2_P)
+            BezierSurface(bez_surf_split_1_P),
+            BezierSurface(bez_surf_split_2_P)
         )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
@@ -1537,6 +1515,14 @@ class RationalBezierSurface(Surface):
         )
 
     def get_control_point_array(self) -> np.ndarray:
+        """
+        Converts the nested list of control points to a 3-D :obj:`~numpy.ndarray`.
+
+        Returns
+        -------
+        numpy.ndarray
+            3-D array
+        """
         return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
 
     def get_homogeneous_control_points(self) -> np.ndarray:
@@ -1600,7 +1586,7 @@ class RationalBezierSurface(Surface):
         # Extract projected control points and weights from array
         new_P, new_w = self.project_homogeneous_control_points(new_Pw)
 
-        return RationalBezierSurface.generate_from_array(new_P, new_w)
+        return RationalBezierSurface(new_P, new_w)
 
     def elevate_degree_v(self) -> "RationalBezierSurface":
         """
@@ -1631,16 +1617,29 @@ class RationalBezierSurface(Surface):
         # Extract projected control points and weights from array
         new_P, new_w = self.project_homogeneous_control_points(new_Pw)
 
-        return RationalBezierSurface.generate_from_array(new_P, new_w)
-
-    @classmethod
-    def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
-        return cls([
-            [Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in point_arr]
-            for point_arr in P], weights)
+        return RationalBezierSurface(new_P, new_w)
 
     @classmethod
     def from_bezier_revolve(cls, bezier: Bezier3D, axis: Line3D, start_angle: Angle, end_angle: Angle):
+        """
+        Creates a rational Bézier surface from the revolution of a Bézier curve about an axis.
+
+        Parameters
+        ----------
+        bezier: Bezier3D
+            Bézier curve to revolve
+        axis: Line3D
+            Axis of revolution
+        start_angle: Angle
+            Starting angle for the revolve
+        end_angle: Angle
+            Ending angle for the revolve
+
+        Returns
+        -------
+        RationalBezierSurface
+            Surface of revolution
+        """
 
         # if abs(end_angle.rad - start_angle.rad) > np.pi / 2:
         #     raise ValueError("Angle difference must be less than or equal to 90 degrees for a rational Bezier surface"
@@ -1846,20 +1845,79 @@ class RationalBezierSurface(Surface):
         # Project the new homogeneous control points onto the w=1 hyperplane
         new_points, new_weights = RationalBezierSurface.project_homogeneous_control_points(Pw)
 
-        return RationalBezierSurface.generate_from_array(new_points, new_weights)
+        return RationalBezierSurface(new_points, new_weights)
 
     def evaluate(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the surface at a given :math:`(u,v)` parameter pair.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        numpy.ndarray
+            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
+        """
         P = self.get_control_point_array()
         return np.array(rational_bezier_surf_eval(P, self.weights, u, v))
 
     def evaluate_point3d(self, u: float, v: float) -> Point3D:
+        r"""
+        Evaluates the rational Bézier surface at a single :math:`(u,v)` parameter pair and returns a point object.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        Point3D
+            Point object corresponding to the :math:`(u,v)` pair
+        """
         return Point3D.from_array(self.evaluate(u, v))
 
     def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the rational Bézier surface on a uniform :math:`N_u \times N_v` grid of parameter values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of uniformly spaced parameter values in the :math:`u`-direction
+        Nv: int
+            Number of uniformly spaced parameter values in the :math:`v`-direction
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
         P = self.get_control_point_array()
         return np.array(rational_bezier_surf_eval_grid(P, self.weights, Nu, Nv))
 
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> RationalBezierCurve3D:
+        """
+        Extracts the control points and weights from one of the four edges of the rational Bézier surface and
+        outputs a rational Bézier curve with these control points and weights
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which to extract the curve
+
+        Returns
+        -------
+        RationalBezierCurve3D
+            Rational Bézier curve with control points corresponding to the control points along the edge of the surface
+        """
         P = self.get_control_point_array()
         w = self.weights
 
@@ -1875,16 +1933,55 @@ class RationalBezierSurface(Surface):
         raise ValueError(f"Invalid surface edge {surface_edge}")
 
     def get_parallel_degree(self, surface_edge: SurfaceEdge):
+        r"""
+        Gets the degree of the curve corresponding to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree parallel to the edge
+        """
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_u
         return self.degree_v
 
     def get_perpendicular_degree(self, surface_edge: SurfaceEdge):
+        r"""
+        Gets the degree of the curve in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree perpendicular to the edge
+        """
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_v
         return self.degree_u
 
     def get_corner_index(self, surface_corner: SurfaceCorner) -> (int, int):
+        """
+        Gets the :math:`i`- and :math:`j`-indices of the control point corresponding to the input corner
+
+        Parameters
+        ----------
+        surface_corner: SurfaceCorner
+            Corner from which to retrieve the index
+
+        Returns
+        -------
+        int, int
+            :math:`i`-index and :math:`j`-index, respectively
+        """
         if surface_corner == SurfaceCorner.u1v1:
             return self.degree_u, self.degree_v
         elif surface_corner == SurfaceCorner.u0v1:
@@ -1897,6 +1994,42 @@ class RationalBezierSurface(Surface):
             raise ValueError("Invalid surface_corner value")
 
     def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Gets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` rational
+        Bézier surface, the following code
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.v0)
+
+        returns the point :math:`\mathbf{P}_{2,1}` and
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.u1)
+
+        returns the point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.set_point`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+
+        Returns
+        -------
+        Point3D
+            Point used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
         if surface_edge == SurfaceEdge.v1:
             return self.points[row_index][-(continuity_index + 1)]
         elif surface_edge == SurfaceEdge.v0:
@@ -1909,6 +2042,41 @@ class RationalBezierSurface(Surface):
             raise ValueError("Invalid surface_edge value")
 
     def set_point(self, point: Point3D, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5`
+        rational Bézier surface, the following code
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of point :math:`\mathbf{P}_{2,1}` to :math:`[3,4,5]^T` and
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` to :math:`[3,4,5]^T`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.get_point`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        point: Point3D
+            Point object to apply at the specified indices
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+        """
         if surface_edge == SurfaceEdge.v1:
             self.points[row_index][-(continuity_index + 1)] = point
         elif surface_edge == SurfaceEdge.v0:
@@ -1920,7 +2088,43 @@ class RationalBezierSurface(Surface):
         else:
             raise ValueError("Invalid surface_edge value")
 
-    def get_weight(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+    def get_weight(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> float:
+        r"""
+        Gets the weight corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` rational
+        Bézier surface, the following code
+
+        .. code-block:: python
+
+            w = surf.get_weight(2, 1, ac.SurfaceEdge.v0)
+
+        returns the weight :math:`w_{2,1}` and
+
+        .. code-block:: python
+
+            w = surf.get_weight(2, 1, ac.SurfaceEdge.u1)
+
+        returns the weight :math:`w_{6-1,2} = w_{5,2}`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.set_weight`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge weights
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the weight
+
+        Returns
+        -------
+        float
+            Weight used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
         if surface_edge == SurfaceEdge.v1:
             return self.weights[row_index][-(continuity_index + 1)]
         elif surface_edge == SurfaceEdge.v0:
@@ -1933,6 +2137,39 @@ class RationalBezierSurface(Surface):
             raise ValueError("Invalid surface_edge value")
 
     def set_weight(self, weight: float, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the weight corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5`
+        rational Bézier surface, the following code
+
+        .. code-block:: python
+
+            surf.set_weight(0.9, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of weight :math:`w_{2,1}` to :math:`0.9` and
+
+        .. code-block:: python
+
+            surf.set_weight(1.1, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of weight :math:`w_{6-1,2} = w_{5,2}` to :math:`1.1`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.get_weight`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        weight: float
+            Weight to apply at the specified indices
+        row_index: int
+            Index along the surface edge weights
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the weight
+        """
         if surface_edge == SurfaceEdge.v1:
             self.weights[row_index][-(continuity_index + 1)] = weight
         elif surface_edge == SurfaceEdge.v0:
@@ -1946,6 +2183,36 @@ class RationalBezierSurface(Surface):
 
     def enforce_g0(self, other: "RationalBezierSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Enforces :math:`G^0` continuity along the input ``surface_edge`` by equating the control points
+        and weights along this edge to the corresponding control points and weights along the ``other_surface_edge``
+        of the rational Bézier surface given by ``other``.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. important::
+
+            The parallel degree of the current surface along ``surface_edge`` must be equal to the parallel degree
+            of the ``other`` surface along ``other_surface_edge``, otherwise an ``AssertionError`` will be raised.
+            If these degrees are not equal, first elevate the degree of the surface with the lower parallel degree
+            until the degrees match using either :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.elevate_degree_u`
+            or :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.elevate_degree_v`, whichever is appropriate.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_c0`
+                Parametric continuity equivalent (:math:`C^0`)
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         # P^b[:, 0] = P^a[:, -1]
         self_parallel_degree = self.get_parallel_degree(surface_edge)
         other_parallel_degree = other.get_parallel_degree(other_surface_edge)
@@ -1958,11 +2225,61 @@ class RationalBezierSurface(Surface):
             self.set_weight(other.get_weight(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
 
     def enforce_c0(self, other: "RationalBezierSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        """
+        For zeroth-degree continuity, there is no difference between geometric (:math:`G^0`) and parametric
+        (:math:`C^0`) continuity. Because this method is simply a convenience method that calls
+        :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0`, see the documentation for that method for more
+        detailed documentation.
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0(other, surface_edge, other_surface_edge)
 
     def enforce_g0g1(self, other: "RationalBezierSurface", f: float or np.ndarray,
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` continuity, then tangent (:math:`G^1`) continuity is enforced according to
+        the following equations:
 
+        .. math::
+
+            \mathcal{W}^{b,\mathcal{E}_b}_{k,1} = \mathcal{W}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \left( \mathcal{W}^{a,\mathcal{E}_a}_{k,0} - \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \right) \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,1} = \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,0}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}} \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \frac{1}{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}} \left[\mathcal{W}^{a,\mathcal{E}_a}_{k,0} \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - \mathcal{P}^{a,\mathcal{E}_a}_{k,1} \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \right] \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0`
+                Geometric point continuity enforcement (:math:`G^0`)
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_c0c1`
+                Parametric continuity equivalent (:math:`C^1`)
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         if isinstance(f, np.ndarray):
             assert len(f) == self.get_parallel_degree(surface_edge) + 1
 
@@ -1992,6 +2309,20 @@ class RationalBezierSurface(Surface):
 
     def enforce_c0c1(self, other: "RationalBezierSurface",
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0g1` with ``f=1.0``. See that
+        method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
 
     def enforce_g0g1_multiface(self, f: float,
@@ -2003,6 +2334,43 @@ class RationalBezierSurface(Surface):
 
     def enforce_g0g1g2(self, other: "RationalBezierSurface", f: float or np.ndarray,
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` and :math:`G^1` continuity, then curvature (:math:`G^2`) continuity is enforced
+        according to the following equations:
+
+        .. math::
+
+            \mathcal{W}^{b,\mathcal{E}_b}_{k,2} = 2 \mathcal{W}^{b,\mathcal{E}_b}_{k,1} - \mathcal{W}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \left[ \mathcal{W}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{W}^{a,\mathcal{E}_a}_{k,1} + \mathcal{W}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,2} = 2 \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \mathcal{P}^{b,\mathcal{E}_b}_{k,1} - \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,0}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \frac{1}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \left[ \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \mathcal{P}^{a,\mathcal{E}_a}_{k,1} + \mathcal{W}^{a,\mathcal{E}_a}_{k,2} \mathcal{P}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+         :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0`
+             Geometric point continuity enforcement (:math:`G^0`)
+         :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0g1`
+             Geometric tangent continuity enforcement (:math:`G^1`)
+         :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_c0c1c2`
+             Parametric continuity equivalent (:math:`C^2`)
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
         n_ratio = (other.get_perpendicular_degree(other_surface_edge) ** 2 -
                    other.get_perpendicular_degree(other_surface_edge)) / (
@@ -2038,6 +2406,20 @@ class RationalBezierSurface(Surface):
 
     def enforce_c0c1c2(self, other: "RationalBezierSurface",
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0g1g2` with ``f=1.0``.
+        See that method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
 
     def dSdu(self, u: float, v: float) -> np.ndarray:
@@ -2599,8 +2981,8 @@ class RationalBezierSurface(Surface):
         P2, w2 = self.project_homogeneous_control_points(transposed_Pw_2)
 
         return (
-            RationalBezierSurface.generate_from_array(P1, w1),
-            RationalBezierSurface.generate_from_array(P2, w2)
+            RationalBezierSurface(P1, w1),
+            RationalBezierSurface(P2, w2)
         )
 
     def split_at_v(self, v0: float) -> ("BezierSurface", "BezierSurface"):
@@ -2644,12 +3026,20 @@ class RationalBezierSurface(Surface):
         P2, w2 = self.project_homogeneous_control_points(bez_surf_split_2_Pw)
 
         return (
-            RationalBezierSurface.generate_from_array(P1, w1),
-            RationalBezierSurface.generate_from_array(P2, w2)
+            RationalBezierSurface(P1, w1),
+            RationalBezierSurface(P2, w2)
         )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
+        """
+        Generates a list of :obj:`~aerocaps.geom.point.Point3D` and :obj:`~aerocaps.geom.curves.Line3D` objects
+        representing the rational Bézier surface's control points and connections between them
 
+        Returns
+        -------
+        typing.List[Point3D], typing.List[Line3D]
+            Control points and lines between adjacent control points in flattened lists
+        """
         control_points = self.get_control_point_array()
         points = []
         lines = []
@@ -2678,19 +3068,59 @@ class RationalBezierSurface(Surface):
 
         return points, lines
 
-    def plot_surface(self, plot: pv.Plotter, **mesh_kwargs):
-        XYZ = self.evaluate_grid(50, 50)
+    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs):
+        """
+        Plots the rational Bézier surface using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        Nu: int
+            Number of points to evaluate in the :math:`u`-parametric direction. Default: ``50``
+        Nv: int
+            Number of points to evaluate in the :math:`v`-parametric direction. Default: ``50``
+        mesh_kwargs:
+            Keyword arguments to pass to :obj:`pyvista.Plotter.add_mesh`
+
+        Returns
+        -------
+        pyvista.core.pointset.StructuredGrid
+            The evaluated rational Bézier surface
+        """
+        XYZ = self.evaluate_grid(Nu, Nv)
         grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
         plot.add_mesh(grid, **mesh_kwargs)
         return grid
 
     def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+        """
+        Plots the network of lines connecting the rational Bézier surface control points using the
+        `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        line_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+        """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
         plot.add_lines(line_arr, **line_kwargs)
 
     def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+        """
+        Plots the rational Bézier surface control points using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        point_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+        """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
         plot.add_points(point_arr, **point_kwargs)
@@ -2894,13 +3324,58 @@ class NURBSSurface(Surface):
         return cls(control_points, knots_u, knots_v, weights)
 
     def evaluate(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the surface at a given :math:`(u,v)` parameter pair.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        numpy.ndarray
+            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
+        """
         P = self.get_control_point_array()
         return np.array(nurbs_surf_eval(P, self.weights, self.knots_u, self.knots_v, u, v))
 
     def evaluate_point3d(self, u: float, v: float) -> Point3D:
+        r"""
+        Evaluates the NURBS surface at a single :math:`(u,v)` parameter pair and returns a point object.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        Point3D
+            Point object corresponding to the :math:`(u,v)` pair
+        """
         return Point3D.from_array(self.evaluate_ndarray(u, v))
 
     def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the NURBS surface on a uniform :math:`N_u \times N_v` grid of parameter values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of uniformly spaced parameter values in the :math:`u`-direction
+        Nv: int
+            Number of uniformly spaced parameter values in the :math:`v`-direction
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
         P = self.get_control_point_array()
         return np.array(nurbs_surf_eval_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
 
@@ -3111,6 +3586,42 @@ class NURBSSurface(Surface):
             raise ValueError("Invalid surface_edge value")
 
     def get_weight(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Gets the weight corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` NURBS surface,
+        the following code
+
+        .. code-block:: python
+
+            w = surf.get_weight(2, 1, ac.SurfaceEdge.v0)
+
+        returns the weight :math:`w_{2,1}` and
+
+        .. code-block:: python
+
+            w = surf.get_weight(2, 1, ac.SurfaceEdge.u1)
+
+        returns the weight :math:`w_{6-1,2} = w_{5,2}`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.set_weight`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge weights
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the weight
+
+        Returns
+        -------
+        float
+            Weight used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
         if surface_edge == SurfaceEdge.v1:
             return self.weights[row_index][-(continuity_index + 1)]
         elif surface_edge == SurfaceEdge.v0:
@@ -3123,6 +3634,39 @@ class NURBSSurface(Surface):
             raise ValueError("Invalid surface_edge value")
 
     def set_weight(self, weight: float, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the weight corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5`
+        NURBS surface, the following code
+
+        .. code-block:: python
+
+            surf.set_weight(0.9, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of weight :math:`w_{2,1}` to :math:`0.9` and
+
+        .. code-block:: python
+
+            surf.set_weight(1.1, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of weight :math:`w_{6-1,2} = w_{5,2}` to :math:`1.1`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.get_weight`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        weight: float
+            Weight to apply at the specified indices
+        row_index: int
+            Index along the surface edge weights
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the weight
+        """
         if surface_edge == SurfaceEdge.v1:
             self.weights[row_index][-(continuity_index + 1)] = weight
         elif surface_edge == SurfaceEdge.v0:
@@ -3135,6 +3679,21 @@ class NURBSSurface(Surface):
             raise ValueError("Invalid surface_edge value")
 
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> NURBSCurve3D:
+        """
+        Extracts the control points, weights, and knots from one of the four edges of the NURBS surface and
+        outputs a NURBS curve with these control points and weights
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which to extract the curve
+
+        Returns
+        -------
+        NURBSCurve3D
+            NURBS curve with control points, weights, and knots corresponding to the control points, weights, and knots
+            along the edge of the surface
+        """
         P = self.get_control_point_array()
         w = self.weights
 
@@ -3151,6 +3710,35 @@ class NURBSSurface(Surface):
 
     def enforce_g0(self, other: "NURBSSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Enforces :math:`G^0` continuity along the input ``surface_edge`` by equating the control points
+        and weights along this edge to the corresponding control points and weights along the ``other_surface_edge``
+        of the NURBS surface given by ``other``.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. important::
+
+            The parallel degree of the current surface along ``surface_edge`` must be equal to the parallel degree
+            of the ``other`` surface along ``other_surface_edge``, otherwise an ``AssertionError`` will be raised.
+            Additionally, the knot vector along the ``surface_edge`` of the current surface must be equal
+            to the knot vector along the ``other_surface_edge`` of the other surface.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBS.enforce_c0`
+                Parametric continuity equivalent (:math:`C^0`)
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         # P^b[:, 0] = P^a[:, -1]
         self_parallel_knots = self.get_parallel_knots(surface_edge)
         other_parallel_knots = other.get_parallel_knots(other_surface_edge)
@@ -3173,11 +3761,61 @@ class NURBSSurface(Surface):
             self.set_weight(other.get_weight(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
 
     def enforce_c0(self, other: "NURBSSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        """
+        For zeroth-degree continuity, there is no difference between geometric (:math:`G^0`) and parametric
+        (:math:`C^0`) continuity. Because this method is simply a convenience method that calls
+        :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0`, see the documentation for that method for more
+        detailed documentation.
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0(other, surface_edge, other_surface_edge)
 
     def enforce_g0g1(self, other: "NURBSSurface", f: float,
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` continuity, then tangent (:math:`G^1`) continuity is enforced according to
+        the following equations:
 
+        .. math::
+
+            \mathcal{W}^{b,\mathcal{E}_b}_{k,1} = \mathcal{W}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \left( \mathcal{W}^{a,\mathcal{E}_a}_{k,0} - \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \right) \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,1} = \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,0}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}} \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \frac{1}{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}} \left[\mathcal{W}^{a,\mathcal{E}_a}_{k,0} \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - \mathcal{P}^{a,\mathcal{E}_a}_{k,1} \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \right] \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBS.enforce_g0`
+                Geometric point continuity enforcement (:math:`G^0`)
+            :obj:`~aerocaps.geom.surfaces.NURBS.enforce_c0c1`
+                Parametric continuity equivalent (:math:`C^1`)
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0(other, surface_edge, other_surface_edge)
         n_ratio = other.get_perpendicular_degree(other_surface_edge) / self.get_perpendicular_degree(surface_edge)
         for row_index in range(self.get_parallel_control_point_length(surface_edge)):
@@ -3202,10 +3840,61 @@ class NURBSSurface(Surface):
 
     def enforce_c0c1(self, other: "NURBSSurface",
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.NURBS.enforce_g0g1` with ``f=1.0``. See that
+        method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
 
     def enforce_g0g1g2(self, other: "NURBSSurface", f: float,
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` and :math:`G^1` continuity, then curvature (:math:`G^2`) continuity is enforced
+        according to the following equations:
+
+        .. math::
+
+            \mathcal{W}^{b,\mathcal{E}_b}_{k,2} = 2 \mathcal{W}^{b,\mathcal{E}_b}_{k,1} - \mathcal{W}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \left[ \mathcal{W}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{W}^{a,\mathcal{E}_a}_{k,1} + \mathcal{W}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,2} = 2 \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \mathcal{P}^{b,\mathcal{E}_b}_{k,1} - \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,0}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \frac{1}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \left[ \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \mathcal{P}^{a,\mathcal{E}_a}_{k,1} + \mathcal{W}^{a,\mathcal{E}_a}_{k,2} \mathcal{P}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+         :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0`
+             Geometric point continuity enforcement (:math:`G^0`)
+         :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0g1`
+             Geometric tangent continuity enforcement (:math:`G^1`)
+         :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_c0c1c2`
+             Parametric continuity equivalent (:math:`C^2`)
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
         n_ratio = (other.get_perpendicular_degree(other_surface_edge) ** 2 -
                    other.get_perpendicular_degree(other_surface_edge)) / (
@@ -3239,6 +3928,20 @@ class NURBSSurface(Surface):
 
     def enforce_c0c1c2(self, other: "NURBSSurface",
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0g1g2` with ``f=1.0``.
+        See that method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
 
     def dSdu(self, u: float, v: float) -> np.ndarray:
@@ -3589,7 +4292,15 @@ class NURBSSurface(Surface):
             raise ValueError(f"No edge called {edge}")
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
+        """
+        Generates a list of :obj:`~aerocaps.geom.point.Point3D` and :obj:`~aerocaps.geom.curves.Line3D` objects
+        representing the NURBS surface's control points and connections between them
 
+        Returns
+        -------
+        typing.List[Point3D], typing.List[Line3D]
+            Control points and lines between adjacent control points in flattened lists
+        """
         control_points = self.get_control_point_array()
         points = []
         lines = []
@@ -3618,19 +4329,59 @@ class NURBSSurface(Surface):
 
         return points, lines
 
-    def plot_surface(self, plot: pv.Plotter, **mesh_kwargs):
-        XYZ = self.evaluate_grid(50, 50)
+    def plot_surface(self, plot: pv.Plotter, Nu: int, Nv: int, **mesh_kwargs):
+        """
+        Plots the NURBS surface using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        Nu: int
+            Number of points to evaluate in the :math:`u`-parametric direction. Default: ``50``
+        Nv: int
+            Number of points to evaluate in the :math:`v`-parametric direction. Default: ``50``
+        mesh_kwargs:
+            Keyword arguments to pass to :obj:`pyvista.Plotter.add_mesh`
+
+        Returns
+        -------
+        pyvista.core.pointset.StructuredGrid
+            The evaluated NURBS surface
+        """
+        XYZ = self.evaluate_grid(Nu, Nv)
         grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
         plot.add_mesh(grid, **mesh_kwargs)
         return grid
 
     def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+        """
+        Plots the network of lines connecting the NURBS surface control points using the
+        `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        line_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+        """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
         plot.add_lines(line_arr, **line_kwargs)
 
     def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+        """
+        Plots the NURBS surface control points using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        point_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+        """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
         plot.add_points(point_arr, **point_kwargs)
