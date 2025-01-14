@@ -38,6 +38,12 @@ __all__ = [
     "CurveOnParametricSurface"
 ]
 
+_projection_dict = {
+    "X": 0,
+    "Y": 1,
+    "Z": 2,
+}
+
 
 class PCurveData2D:
     def __init__(self, t: np.ndarray, xy: np.ndarray, xpyp: np.ndarray, xppypp: np.ndarray, k: np.ndarray,
@@ -695,6 +701,8 @@ class Bezier3D(PCurve3D):
             The columns represent :math:`C^{(m)}_x(t)` and :math:`C^{(m)}_y(t)`, where :math:`m` is the
             derivative order.
         """
+        if order > degree:
+            return np.zeros((len(t), 3))
         return np.sum(np.array([np.prod(np.array([degree - idx for idx in range(order)])) *
                                 np.array([self.finite_diff_P(P, order, i)]).T *
                                 np.array([bernstein_poly(degree - order, i, t)])
@@ -893,17 +901,34 @@ class Bezier3D(PCurve3D):
             Bezier3D(bez_2_points)
         )
 
+    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, t_vec: np.ndarray = None, **plt_kwargs):
+        projection = "XYZ" if projection is None else projection
+        t_vec = np.linspace(0.0, 1.0, 201) if t_vec is None else None
+        data = self.evaluate(t_vec).xyz
+        args = tuple([data[:, _projection_dict[axis]] for axis in projection])
+
+        if isinstance(ax, plt.Axes):
+            ax.plot(*args, **plt_kwargs)
+        elif isinstance(ax, pv.Plotter):
+            arr = [data[0]]
+            for row in data[1:-1]:
+                arr.append(row)
+                arr.append(row)
+            arr.append(data[-1])
+            ax.add_lines(np.array(arr), **plt_kwargs)
+
 
 class NURBSCurve3D(Geometry3D):
     def __init__(self,
-                 control_points: np.ndarray,
+                 control_points: typing.List[Point3D] or np.ndarray,
                  weights: np.ndarray,
                  knot_vector: np.ndarray,
                  degree: int):
         """
         Non-uniform rational B-spline (NURBS) curve evaluation class
         """
-        assert control_points.ndim == 2
+        control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
+            control_points, np.ndarray) else control_points
         assert weights.ndim == 1
         assert knot_vector.ndim == 1
         assert len(knot_vector) == len(control_points) + degree + 1
@@ -915,7 +940,6 @@ class NURBSCurve3D(Geometry3D):
                 raise NegativeWeightError("All weights must be non-negative")
 
         self.control_points = control_points
-        self.dim = self.control_points.shape[1]
         self.weights = np.array(weights)
         self.knot_vector = np.array(knot_vector)
         self.degree = degree
@@ -925,22 +949,42 @@ class NURBSCurve3D(Geometry3D):
         return aerocaps.iges.curves.RationalBSplineCurveIGES(
             knots=self.knot_vector,
             weights=self.weights,
-            control_points_XYZ=self.control_points,
+            control_points_XYZ=self.get_control_point_array(),
             degree=self.degree
         )
 
     def reverse(self) -> "NURBSCurve3D":
-        return self.__class__(np.flipud(self.control_points),
+        return self.__class__(np.flipud(self.get_control_point_array()),
                               self.weights[::-1],
                               (1.0 - self.knot_vector)[::-1],
                               self.degree)
+
+    def get_control_point_array(self) -> np.ndarray:
+        return np.array([p.as_array() for p in self.control_points])
+
+    def get_homogeneous_control_points(self) -> np.ndarray:
+        r"""
+        Gets the array of control points in homogeneous coordinates, :math:`\mathbf{P}_i \cdot w_i`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n + 1) \times 4`, where :math:`n` is the curve degree. The four columns, in order,
+            represent the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
+            control point.
+        """
+        return np.column_stack((
+            self.get_control_point_array() * np.repeat(self.weights[:, np.newaxis], 3, axis=1),
+            self.weights
+        ))
 
     def evaluate_ndarray(self, t: float) -> np.ndarray:
         """
         Evaluate the NURBS curve at parameter t
         """
         B = self._basis_functions(t, self.degree)
-        point = np.dot(B * self.weights, self.control_points) / np.sum(B * self.weights)
+        P = self.get_control_point_array()
+        point = np.dot(B * self.weights, P) / np.sum(B * self.weights)
         return point
 
     def evaluate_simple(self, t: float) -> Point3D:
@@ -1016,12 +1060,6 @@ class NURBSCurve3D(Geometry3D):
 
 
 class RationalBezierCurve3D(Geometry3D):
-
-    _projection_dict = {
-        "X": 0,
-        "Y": 1,
-        "Z": 2,
-    }
 
     def __init__(self,
                  control_points: typing.List[Point3D],
@@ -1142,20 +1180,50 @@ class RationalBezierCurve3D(Geometry3D):
         """
         Evaluates the NURBS curve at a vector of parameter values
         """
-        points = np.array([self.evaluate_ndarray(t) for t in t_vec])
+        points = np.array([self.evaluate_simple(t) for t in t_vec])
         return points
 
-    def plot(self, ax: plt.Axes, projection: str = None, t_vec: np.ndarray = None, **plt_kwargs):
+    def compute_t_corresponding_to_x(self, x_seek: float, t0: float = 0.5):
+        def bez_root_find_func(t):
+            point = self.evaluate_simple(t[0])
+            return np.array([point.x.m - x_seek])
+
+        return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
+
+    def compute_t_corresponding_to_y(self, y_seek: float, t0: float = 0.5):
+        def bez_root_find_func(t):
+            point = self.evaluate_simple(t[0])
+            return np.array([point.y.m - y_seek])
+
+        return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
+
+    def compute_t_corresponding_to_z(self, z_seek: float, t0: float = 0.5):
+        def bez_root_find_func(t):
+            point = self.evaluate_simple(t[0])
+            return np.array([point.z.m - z_seek])
+
+        return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
+
+    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, t_vec: np.ndarray = None, **plt_kwargs):
         projection = "XYZ" if projection is None else projection
         t_vec = np.linspace(0.0, 1.0, 201) if t_vec is None else None
         data = self.evaluate(t_vec)
-        args = tuple([data[:, self._projection_dict[axis]] for axis in projection])
-        ax.plot(*args, **plt_kwargs)
+        args = tuple([data[:, _projection_dict[axis]] for axis in projection])
+
+        if isinstance(ax, plt.Axes):
+            ax.plot(*args, **plt_kwargs)
+        elif isinstance(ax, pv.Plotter):
+            arr = [data[0]]
+            for row in data[1:-1]:
+                arr.append(row)
+                arr.append(row)
+            arr.append(data[-1])
+            ax.add_lines(np.array(arr), **plt_kwargs)
 
     def plot_control_points(self, ax: plt.Axes, projection: str = None, **plt_kwargs):
         projection = "XYZ" if projection is None else projection
         cps = self.get_control_point_array()
-        args = tuple([cps[:, self._projection_dict[axis]] for axis in projection])
+        args = tuple([cps[:, _projection_dict[axis]] for axis in projection])
         ax.plot(*args, **plt_kwargs)
 
     def compute_curvature_at_t0(self) -> float:

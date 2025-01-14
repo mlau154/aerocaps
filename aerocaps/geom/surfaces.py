@@ -3,34 +3,33 @@ Parametric surface classes (two-dimensional geometric objects defined by paramet
 that reside in three-dimensional space)
 """
 import typing
-from copy import deepcopy
 from enum import Enum
 
 import numpy as np
 import pyvista as pv
 from scipy.optimize import fsolve
-import shapely
 
 import aerocaps.iges.entity
 import aerocaps.iges.curves
 import aerocaps.iges.surfaces
+from rust_nurbs import *
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
 from aerocaps.geom.point import Point3D
 from aerocaps.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
-import aerocaps
-from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis
+from aerocaps.geom.plane import Plane
+from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis, add_vector_to_point
 from aerocaps.geom.vector import Vector3D
 from aerocaps.units.angle import Angle
 from aerocaps.units.length import Length
-from aerocaps.utils.math import bernstein_poly
+from aerocaps.utils.array import unique_with_tolerance
 
 __all__ = [
     "SurfaceEdge",
     "SurfaceCorner",
     "BezierSurface",
     "RationalBezierSurface",
+    "BSplineSurface",
     "NURBSSurface",
-    "PlanarFillSurfaceCreator",
     "TrimmedSurface"
 ]
 
@@ -61,7 +60,7 @@ class SurfaceCorner(Enum):
 
 class BezierSurface(Surface):
     """
-    Bézier surface class. A NURBS surface with no internal knot spans and all weights equal to unity.
+    Bézier surface class. A NURBS surface with no internal knots and all weights equal to unity.
     """
     def __init__(self, points: typing.List[typing.List[Point3D]] or np.ndarray):
         r"""
@@ -100,10 +99,10 @@ class BezierSurface(Surface):
             A :math:`2 \times 3` Bézier surface with isoparametric curves in both :math:`u` and :math:`v` shown
 
         Bézier surfaces can be constructed either via the default constructor with a nested list of
-        ``aerocaps.geom.point.Point3D`` objects of by means of the ``generate_from_array`` class method where only a
-        3-D ``numpy`` array is required. For example, say we have six ``Point3D`` objects, A-F and would like to use
+        ``aerocaps.geom.point.Point3D`` objects of by a
+        3-D ``numpy`` array. For example, say we have six ``Point3D`` objects, A-F and would like to use
         them to create a :math:`2 \times 1` Bézier surface.
-        Using the default constructor,
+        Using the default constructor with the point objects,
 
         .. code-block:: python
 
@@ -119,7 +118,7 @@ class BezierSurface(Surface):
                 [[pE_x, pE_y, pE_z], [pF_x, pF_y, pF_z]],
             ])
 
-            surf = BezierSurface.generate_from_array(control_points)
+            surf = BezierSurface(control_points)
 
         Parameters
         ----------
@@ -167,29 +166,69 @@ class BezierSurface(Surface):
         return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
 
     @classmethod
-    def generate_from_array(cls, P: np.ndarray):
-        r"""
-        Creates a new Bézier surface from a 3-D :obj:`~numpy.ndarray`.
+    def from_curve_extrude(cls, curve: Bezier3D, distance: Length, extrude_axis: Vector3D = None,
+                           symmetric: bool = False, reverse: bool = False):
+        """
+        Creates a Bézier surface by extruding a Bézier curve along an axis.
+
+        .. important::
+
+            If the input curve is linear, the ``extrude_axis`` argument must be specified.
 
         Parameters
         ----------
-        P: numpy.ndarray
-            Array of control points of size :math:`(n+1) \times (m+1) \times 3`, where :math:`n` is the surface
-            degree in the :math:`u`-parametric direction and :math:`m` is the surface degree in the
-            :math:`v`-parametric direction
+        curve: Bezier3D
+            Curve to extrude. The most common use case is a planar curve, but this is not required.
+        distance: Length
+            Distance along the axis to extrude
+        extrude_axis: Vector3D
+            Optional direct specification of the extrusion axis. If not specified, a vector normal to the plane
+            containing the first, second, and last control points of the curve is used. Default: ``None``
+        symmetric: bool
+            Whether to extrude in both directions. Default: ``False``
+        reverse: bool
+            Whether to flip the extrusion vector. Default: ``False``
 
         Returns
         -------
         BezierSurface
-            New Bézier surface created from the input control points
+            Extruded surface
         """
-        return cls([
-            [Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in point_arr]
-            for point_arr in P])
+        # Input validation
+        if curve.degree < 2 and extrude_axis is None:
+            raise ValueError("For linear Bézier curves (those with only two control points), "
+                             "the 'extrude_axis` argument must be specified")
 
-    def evaluate_ndarray(self, u: float, v: float):
+        # Get the axis along which to extrude
+        if extrude_axis is None:
+            plane = Plane(p0=curve.control_points[0], p1=curve.control_points[1], p2=curve.control_points[-1])
+            extrude_axis = plane.compute_normal()
+        else:
+            extrude_axis = extrude_axis.get_normalized_vector()
+
+        # Get the scaled extrusion vectors
+        extrude_vec_forward = extrude_axis.scale(distance.m)
+        extrude_vec_backward = extrude_axis.scale(distance.m)
+
+        # Get the start and end point lists for the surface
+        if symmetric:
+            start_points = [add_vector_to_point(extrude_vec_forward, p) for p in curve.control_points]
+            end_points = [add_vector_to_point(extrude_vec_backward, p) for p in curve.control_points]
+        else:
+            start_points = curve.control_points
+            if reverse:
+                end_points = [add_vector_to_point(extrude_vec_backward, p) for p in curve.control_points]
+            else:
+                end_points = [add_vector_to_point(extrude_vec_forward, p) for p in curve.control_points]
+
+        # Create the extruded surface
+        surf = cls([start_points, end_points])
+
+        return surf
+
+    def dSdu(self, u: float, v: float) -> np.ndarray:
         r"""
-        Evaluates the surface at a given :math:`(u,v)` parameter pair.
+        Evaluates the first derivative with respect to :math:`u` at a single :math:`(u,v)` pair
 
         Parameters
         ----------
@@ -200,26 +239,55 @@ class BezierSurface(Surface):
 
         Returns
         -------
-        numpy.ndarray
-            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
         """
         P = self.get_control_point_array()
+        return np.array(bezier_surf_dsdu(P, u, v))
 
-        # Evaluate the surface
-        point = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                Bu = bernstein_poly(self.degree_u, i, u)
-                Bv = bernstein_poly(self.degree_v, j, v)
-                BuBv = Bu * Bv
-                point += P[i, j, :] * BuBv
-
-        return point
-
-    def dSdu(self, u: float, v: float):
+    def dSdu_grid(self, Nu: int, Nv: int) -> np.ndarray:
         r"""
-        Evaluates the first derivative of the surface in the :math:`u`-direction,
-        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}`, at a given :math:`(u,v)` parameter pair.
+        Evaluates the first derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_dsdu_grid(P, Nu, Nv))
+
+    def dSdu_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_dsdu_uvvecs(P, u, v))
+
+    def dSdv(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the first derivative with respect to :math:`v` at a single :math:`(u,v)` pair
 
         Parameters
         ----------
@@ -230,25 +298,55 @@ class BezierSurface(Surface):
 
         Returns
         -------
-        numpy.ndarray
-            1-D array of the form ``array([dSdu_x, dSdu_y, dSdu_z])`` representing the :math:`x`-, :math:`y`-,
-            and :math:`z`-components of :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}`
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
         """
         P = self.get_control_point_array()
-        deriv_u = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                dbudu = self.degree_u * (bernstein_poly(self.degree_u - 1, i - 1, u) - bernstein_poly(
-                    self.degree_u - 1, i, u))
-                bv = bernstein_poly(self.degree_v, j, v)
-                dbudu_bv = dbudu * bv
-                deriv_u += P[i, j, :] * dbudu_bv
-        return deriv_u
+        return np.array(bezier_surf_dsdv(P, u, v))
 
-    def dSdv(self, u: float, v: float):
+    def dSdv_grid(self, Nu: int, Nv: int) -> np.ndarray:
         r"""
-        Evaluates the first derivative of the surface in the :math:`v`-direction,
-        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}`, at a given :math:`(u,v)` parameter pair.
+        Evaluates the first derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_dsdv_grid(P, Nu, Nv))
+
+    def dSdv_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_dsdv_uvvecs(P, u, v))
+
+    def d2Sdu2(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` at a single :math:`(u,v)` pair
 
         Parameters
         ----------
@@ -259,25 +357,55 @@ class BezierSurface(Surface):
 
         Returns
         -------
-        numpy.ndarray
-            1-D array of the form ``array([dSdv_x, dSdv_y, dSdv_z])`` representing the :math:`x`-, :math:`y`-,
-            and :math:`z`-components of :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}`
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
         """
         P = self.get_control_point_array()
-        deriv_v = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                dbvdv = self.degree_v * (bernstein_poly(self.degree_v - 1, j - 1, v) - bernstein_poly(
-                    self.degree_v - 1, j, v))
-                bu = bernstein_poly(self.degree_u, i, u)
-                bu_dbvdv = bu * dbvdv
-                deriv_v += P[i, j, :] * bu_dbvdv
-        return deriv_v
+        return np.array(bezier_surf_d2sdu2(P, u, v))
 
-    def d2Sdu2(self, u: float, v: float):
+    def d2Sdu2_grid(self, Nu: int, Nv: int) -> np.ndarray:
         r"""
-        Evaluates the second pure derivative of the surface in the :math:`u`-direction,
-        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}`, at a given :math:`(u,v)` parameter pair.
+        Evaluates the second derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_d2sdu2_grid(P, Nu, Nv))
+
+    def d2Sdu2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_d2sdu2_uvvecs(P, u, v))
+
+    def d2Sdv2(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the second derivative with respect to :math:`v` at a single :math:`(u,v)` pair
 
         Parameters
         ----------
@@ -288,55 +416,51 @@ class BezierSurface(Surface):
 
         Returns
         -------
-        numpy.ndarray
-            1-D array of the form ``array([dS2du2_x, dS2du2_y, dS2du2_z])`` representing the :math:`x`-, :math:`y`-,
-            and :math:`z`-components of :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}`
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
         """
         P = self.get_control_point_array()
-        deriv_u_2 = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                term_1 = self.degree_u * (self.degree_u - 1) * (
-                        bernstein_poly(self.degree_u - 2, i - 2, u) - bernstein_poly(self.degree_u - 2, i - 1, u))
-                term_2 = self.degree_u * (self.degree_u - 1) * (
-                        bernstein_poly(self.degree_u - 2, i - 1, u) - bernstein_poly(self.degree_u - 2, i, u))
-                d2budu2 = term_1 - term_2
-                Bv = bernstein_poly(self.degree_v, j, v)
-                d2budu2_Bv = d2budu2 * Bv
-                deriv_u_2 += P[i, j, :] * d2budu2_Bv
-        return deriv_u_2
+        return np.array(bezier_surf_d2sdv2(P, u, v))
 
-    def d2Sdv2(self, u: float, v: float):
+    def d2Sdv2_grid(self, Nu: int, Nv: int) -> np.ndarray:
         r"""
-        Evaluates the second pure derivative of the surface in the :math:`v`-direction,
-        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}`, at a given :math:`(u,v)` parameter pair.
+        Evaluates the second derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
 
         Parameters
         ----------
-        u: float
-            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
-        v: float
-            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
 
         Returns
         -------
-        numpy.ndarray
-            1-D array of the form ``array([dS2dv2_x, dS2dv2_y, dS2dv2_z])`` representing the :math:`x`-, :math:`y`-,
-            and :math:`z`-components of :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}`
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
         """
         P = self.get_control_point_array()
-        deriv_v_2 = np.zeros(P.shape[2])
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                term1 = self.degree_v * (self.degree_v - 1) * (
-                            bernstein_poly(self.degree_v - 2, j - 2, v) - bernstein_poly(self.degree_v - 2, j - 1, v))
-                term2 = self.degree_v * (self.degree_v - 1) * (
-                            bernstein_poly(self.degree_v - 2, j - 1, v) - bernstein_poly(self.degree_v - 2, j, v))
-                d2bvdv2 = term1 - term2
-                Bu = bernstein_poly(self.degree_u, i, u)
-                Bu_d2bvdv2 = Bu * d2bvdv2
-                deriv_v_2 += P[i, j, :] * Bu_d2bvdv2
-        return deriv_v_2
+        return np.array(bezier_surf_d2sdv2_grid(P, Nu, Nv))
+
+    def d2Sdv2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_d2sdv2_uvvecs(P, u, v))
 
     def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
         r"""
@@ -347,53 +471,98 @@ class BezierSurface(Surface):
         edge: SurfaceEdge
             Edge along which to evaluate
         n_points: int
-            Number of evenly-spaced parameter locations at which to evaluate the edge curve
+            Number of evenly-spaced parameter locations at which to evaluate the edge curve. Default: 10
 
         Returns
         -------
         numpy.ndarray
             2-D array of size :math:`n_\text{points} \times 3`
         """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([self.evaluate_ndarray(u, 1) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_eval_iso_v(P, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([self.evaluate_ndarray(u, 0) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_eval_iso_v(P, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([self.evaluate_ndarray(1, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_eval_iso_u(P, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([self.evaluate_ndarray(0, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_eval_iso_u(P, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
     def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular derivative along a surface edge at ``n_points`` parameter locations.
+        The derivative represents either :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}` or
+        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([(self.dSdv(u, 1.0) if perp else
-                              self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_dsdv_iso_v(P, n_points, 1.0)) if perp else np.array(
+                bezier_surf_dsdu_iso_v(P, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([(self.dSdv(u, 0.0) if perp else
-                              self.dSdu(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_dsdv_iso_v(P, n_points, 0.0)) if perp else np.array(
+                bezier_surf_dsdu_iso_v(P, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([(self.dSdu(1.0, v) if perp else
-                              self.dSdv(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_dsdu_iso_u(P, 1.0, n_points)) if perp else np.array(
+                bezier_surf_dsdv_iso_u(P, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([(self.dSdu(0.0, v) if perp else
-                              self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_dsdu_iso_u(P, 0.0, n_points)) if perp else np.array(
+                bezier_surf_dsdv_iso_u(P, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
     def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular second derivative along a surface edge at ``n_points`` parameter
+        locations. The derivative represents either :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}` or
+        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the second derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the second derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([(self.d2Sdv2(u, 1.0) if perp else
-                              self.d2Sdu2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_d2sdv2_iso_v(P, n_points, 1.0)) if perp else np.array(
+                bezier_surf_d2sdu2_iso_v(P, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([(self.d2Sdv2(u, 0.0) if perp else
-                              self.d2Sdu2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_d2sdv2_iso_v(P, n_points, 0.0)) if perp else np.array(
+                bezier_surf_d2sdu2_iso_v(P, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([(self.d2Sdu2(1.0, v) if perp else
-                              self.d2Sdv2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_d2sdu2_iso_u(P, 1.0, n_points)) if perp else np.array(
+                bezier_surf_d2sdv2_iso_u(P, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([(self.d2Sdu2(0.0, v) if perp else
-                              self.d2Sdv2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(bezier_surf_d2sdu2_iso_u(P, 0.0, n_points)) if perp else np.array(
+                bezier_surf_d2sdv2_iso_u(P, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
@@ -490,16 +659,96 @@ class BezierSurface(Surface):
                     continue
                 assert np.isclose(dxdydz_ratio, current_f)
 
-    def evaluate_simple(self, u: float, v: float) -> Point3D:
-        return Point3D.from_array(self.evaluate_ndarray(u, v))
+    def evaluate(self, u: float, v: float):
+        r"""
+        Evaluates the surface at a given :math:`(u,v)` parameter pair.
 
-    def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
-        U, V = np.meshgrid(np.linspace(0.0, 1.0, Nu), np.linspace(0.0, 1.0, Nv))
-        return np.array(
-            [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])]
-        )
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        numpy.ndarray
+            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_eval(P, u, v))
+
+    def evaluate_point3d(self, u: float, v: float) -> Point3D:
+        r"""
+        Evaluates the Bézier surface at a single :math:`(u,v)` parameter pair and returns a point object.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        Point3D
+            Point object corresponding to the :math:`(u,v)` pair
+        """
+        return Point3D.from_array(self.evaluate(u, v))
+
+    def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the Bézier surface on a uniform :math:`N_u \times N_v` grid of parameter values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of uniformly spaced parameter values in the :math:`u`-direction
+        Nv: int
+            Number of uniformly spaced parameter values in the :math:`v`-direction
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_eval_grid(P, Nu, Nv))
+
+    def evaluate_uvvecs(self, u: np.ndarray, v: np.ndarray) -> np.ndarray:
+        r"""
+        Evaluates the Bézier surface at arbitrary vectors of :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_eval_uvvecs(P, u, v))
 
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> Bezier3D:
+        """
+        Extracts the control points from one of the four edges of the Bézier surface and outputs a Bézier curve with
+        these control points
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which to extract the curve
+
+        Returns
+        -------
+        Bezier3D
+            Bézier curve with control points corresponding to the control points along the edge of the surface
+        """
         P = self.get_control_point_array()
 
         if surface_edge == SurfaceEdge.u0:
@@ -545,7 +794,7 @@ class BezierSurface(Surface):
             for j in range(0, m + 1):  # for all j
                 new_control_points[i, j, :] = i / (n + 1) * P[i - 1, j, :] + (1 - i / (n + 1)) * P[i, j, :]
 
-        return BezierSurface.generate_from_array(new_control_points)
+        return BezierSurface(new_control_points)
 
     def elevate_degree_v(self) -> "BezierSurface":
         r"""
@@ -579,9 +828,29 @@ class BezierSurface(Surface):
             for j in range(1, m + 1):  # 1 <= j <= m
                 new_control_points[i, j, :] = j / (m + 1) * P[i, j - 1, :] + (1 - j / (m + 1)) * P[i, j, :]
 
-        return BezierSurface.generate_from_array(new_control_points)
+        return BezierSurface(new_control_points)
 
-    def extract_isoparametric_curve_u(self, Nu: int, v: float) -> np.ndarray:
+    def extract_isoparametric_curve_u(self, u: float, Nv: int) -> np.ndarray:
+        r"""
+        Extracts a curve along the :math:`v`-direction at a fixed value of :math:`u`
+
+        Parameters
+        ----------
+        u: float
+            Constant value of :math:`u`
+        Nv: int
+            Number of points to evaluate, linearly spaced in :math:`v`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_v \times 3` representing the :math:`x`-, :math:`y`-, and :math:`z`-coordinates
+            of the points evaluated along the isoparametric curve
+        """
+        v_vec = np.linspace(0.0, 1.0, Nv)
+        return np.array([self.evaluate(u, v) for v in v_vec])
+
+    def extract_isoparametric_curve_v(self, Nu: int, v: float) -> np.ndarray:
         r"""
         Extracts a curve along the :math:`u`-direction at a fixed value of :math:`v`
 
@@ -598,40 +867,82 @@ class BezierSurface(Surface):
             Array of size :math:`N_u \times 3` representing the :math:`x`-, :math:`y`-, and :math:`z`-coordinates
             of the points evaluated along the isoparametric curve
         """
-        u_vec = np.linspace(0.0, 1.0, Nu)
-        return np.array([self.evaluate_ndarray(u, v) for u in u_vec])
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_eval_iso_v(P, Nu, v))
 
-    def extract_isoparametric_curve_v(self, Nv: int, u: float) -> np.ndarray:
+    def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
         r"""
-        Extracts a curve along the :math:`v`-direction at a fixed value of :math:`u`
+        Gets the degree of the curve corresponding to the input surface edge.
 
         Parameters
         ----------
-        Nv: int
-            Number of points to evaluate, linearly spaced in :math:`u`
-        u: float
-            Constant value of :math:`v`
+        surface_edge: SurfaceEdge
+            Edge along which the parallel degree is evaluated
 
         Returns
         -------
-        numpy.ndarray
-            Array of size :math:`N_v \times 3` representing the :math:`x`-, :math:`y`-, and :math:`z`-coordinates
-            of the points evaluated along the isoparametric curve
+        int
+            Degree parallel to the edge
         """
-        v_vec = np.linspace(0.0, 1.0, Nv)
-        return np.array([self.evaluate_ndarray(u, v) for v in v_vec])
-
-    def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_u
         return self.degree_v
 
     def get_perpendicular_degree(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the degree of the curve in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree perpendicular to the edge
+        """
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_v
         return self.degree_u
 
     def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> Point3D:
+        r"""
+        Gets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` Bézier surface,
+        the following code
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.v0)
+
+        returns the point :math:`\mathbf{P}_{2,1}` and
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.u1)
+
+        returns the point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.set_point`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+
+        Returns
+        -------
+        Point3D
+            Point used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
         if surface_edge == SurfaceEdge.v1:
             return self.points[row_index][-(continuity_index + 1)]
         elif surface_edge == SurfaceEdge.v0:
@@ -644,6 +955,41 @@ class BezierSurface(Surface):
             raise ValueError("Invalid surface_edge value")
 
     def set_point(self, point: Point3D, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` Bézier surface,
+        the following code
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of point :math:`\mathbf{P}_{2,1}` to :math:`[3,4,5]^T` and
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` to :math:`[3,4,5]^T`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.get_point`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        point: Point3D
+            Point object to apply at the specified indices
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+        """
         if surface_edge == SurfaceEdge.v1:
             self.points[row_index][-(continuity_index + 1)] = point
         elif surface_edge == SurfaceEdge.v0:
@@ -657,16 +1003,96 @@ class BezierSurface(Surface):
 
     def enforce_g0(self, other: "BezierSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Enforces :math:`G^0` continuity along the input ``surface_edge`` by equating the control points along this edge
+        to the control points along the ``other_surface_edge`` of the Bézier surface given by ``other``.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
 
-        assert self.get_parallel_degree(surface_edge) == other.get_parallel_degree(other_surface_edge)
+        .. important::
+
+            The parallel degree of the current surface along ``surface_edge`` must be equal to the parallel degree
+            of the ``other`` surface along ``other_surface_edge``, otherwise an ``AssertionError`` will be raised.
+            If these degrees are not equal, first elevate the degree of the surface with the lower parallel degree
+            until the degrees match using either :obj:`~aerocaps.geom.surfaces.BezierSurface.elevate_degree_u`
+            or :obj:`~aerocaps.geom.surfaces.BezierSurface.elevate_degree_v`, whichever is appropriate.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_c0`
+                Parametric continuity equivalent (:math:`C^0`)
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self_parallel_degree = self.get_parallel_degree(surface_edge)
+        other_parallel_degree = other.get_parallel_degree(other_surface_edge)
+        if self_parallel_degree != other_parallel_degree:
+            raise ValueError(f"Degree parallel to the edge of the input surface ({self_parallel_degree}) does "
+                             f"not match the degree parallel to the edge of the other surface "
+                             f"({other_parallel_degree})")
         for row_index in range(self.get_parallel_degree(surface_edge) + 1):
             self.set_point(other.get_point(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
 
     def enforce_c0(self, other: "BezierSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        """
+        For zeroth-degree continuity, there is no difference between geometric (:math:`G^0`) and parametric
+        (:math:`C^0`) continuity. Because this method is simply a convenience method that calls
+        :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0`, see the documentation for that method for more
+        detailed documentation.
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0(other, surface_edge, other_surface_edge)
 
     def enforce_g0g1(self, other: "BezierSurface", f: float,
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` continuity, then tangent (:math:`G^1`) continuity is enforced according to
+        the following equation:
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,1} = \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \left[\mathcal{P}^{a,\mathcal{E}_a}_{k,0} - \mathcal{P}^{a,\mathcal{E}_a}_{k,1} \right] \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0`
+                Geometric point continuity enforcement (:math:`G^0`)
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_c0c1`
+                Parametric continuity equivalent (:math:`C^1`)
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0(other, surface_edge, other_surface_edge)
         n_ratio = other.get_perpendicular_degree(other_surface_edge) / self.get_perpendicular_degree(surface_edge)
         for row_index in range(self.get_parallel_degree(surface_edge) + 1):
@@ -679,10 +1105,57 @@ class BezierSurface(Surface):
 
     def enforce_c0c1(self, other: "BezierSurface",
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0g1` with ``f=1.0``. See that
+        method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
 
     def enforce_g0g1g2(self, other: "BezierSurface", f: float,
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` and :math:`G^1` continuity, then curvature (:math:`G^2`) continuity is enforced
+        according to the following equation:
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,2} = 2 \mathcal{P}^{b,\mathcal{E}_b}_{k,1} - \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \left[ \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{P}^{a,\mathcal{E}_a}_{k,1} + \mathcal{P}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0`
+                Geometric point continuity enforcement (:math:`G^0`)
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0g1`
+                Geometric tangent continuity enforcement (:math:`G^1`)
+            :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_c0c1c2`
+                Parametric continuity equivalent (:math:`C^2`)
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
         p_perp_a = other.get_perpendicular_degree(other_surface_edge)
         p_perp_b = self.get_perpendicular_degree(surface_edge)
@@ -698,8 +1171,21 @@ class BezierSurface(Surface):
             self.set_point(P_i2_b, row_index, 2, surface_edge)
 
     def enforce_c0c1c2(self, other: "BezierSurface",
-
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0g1g2` with ``f=1.0``. See that
+        method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: BezierSurface
+            Another Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
 
     def get_u_or_v_given_uvxyz(self, u: float = None, v: float = None, uv_guess: float = 0.5,
@@ -762,11 +1248,11 @@ class BezierSurface(Surface):
             raise ValueError("Did not detect an x, y, or z input")
 
         def root_find_func_u(u_current):
-            point = self.evaluate_simple(u_current, v)
+            point = self.evaluate_point3d(u_current, v)
             return np.array([getattr(point, xyz).m - xyz_val])
 
         def root_find_func_v(v_current):
-            point = self.evaluate_simple(u, v_current)
+            point = self.evaluate_point3d(u, v_current)
             return np.array([getattr(point, xyz).m - xyz_val])
 
         if v is not None:
@@ -777,7 +1263,7 @@ class BezierSurface(Surface):
 
     def split_at_u(self, u0: float) -> ("BezierSurface", "BezierSurface"):
         """
-        Splits the Bezier surface at :math:`u=u_0` along the :math:`v`-parametric direction.
+        Splits the Bézier surface at :math:`u=u_0` along the :math:`v`-parametric direction.
         """
         P = self.get_control_point_array()
 
@@ -813,12 +1299,12 @@ class BezierSurface(Surface):
         ])
 
         return (
-            BezierSurface.generate_from_array(
+            BezierSurface(
                 np.transpose(
                     bez_surf_split_1_P, (1, 0, 2)
                 )
             ),
-            BezierSurface.generate_from_array(
+            BezierSurface(
                 np.transpose(
                     bez_surf_split_2_P, (1, 0, 2)
                 )
@@ -827,7 +1313,7 @@ class BezierSurface(Surface):
 
     def split_at_v(self, v0: float) -> ("BezierSurface", "BezierSurface"):
         """
-        Splits the Bezier surface at :math:`v=v_0` along the :math:`u`-parametric direction.
+        Splits the Bézier surface at :math:`v=v_0` along the :math:`u`-parametric direction.
         """
         P = self.get_control_point_array()
 
@@ -863,12 +1349,20 @@ class BezierSurface(Surface):
         ])
 
         return (
-            BezierSurface.generate_from_array(bez_surf_split_1_P),
-            BezierSurface.generate_from_array(bez_surf_split_2_P)
+            BezierSurface(bez_surf_split_1_P),
+            BezierSurface(bez_surf_split_2_P)
         )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
+        """
+        Generates a list of :obj:`~aerocaps.geom.point.Point3D` and :obj:`~aerocaps.geom.curves.Line3D` objects
+        representing the Bézier surface's control points and connections between them
 
+        Returns
+        -------
+        typing.List[Point3D], typing.List[Line3D]
+            Control points and lines between adjacent control points in flattened lists
+        """
         points = []
         lines = []
         control_points = self.get_control_point_array()
@@ -897,26 +1391,69 @@ class BezierSurface(Surface):
 
         return points, lines
 
-    def plot_surface(self, plot: pv.Plotter, **mesh_kwargs):
-        XYZ = self.evaluate(50, 50)
+    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs):
+        """
+        Plots the Bézier surface using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        Nu: int
+            Number of points to evaluate in the :math:`u`-parametric direction. Default: ``50``
+        Nv: int
+            Number of points to evaluate in the :math:`v`-parametric direction. Default: ``50``
+        mesh_kwargs:
+            Keyword arguments to pass to :obj:`pyvista.Plotter.add_mesh`
+
+        Returns
+        -------
+        pyvista.core.pointset.StructuredGrid
+            The evaluated Bézier surface
+        """
+        XYZ = self.evaluate_grid(Nu, Nv)
         grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
         plot.add_mesh(grid, **mesh_kwargs)
 
         return grid
 
     def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+        """
+        Plots the network of lines connecting the Bézier surface control points using the
+        `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        line_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+        """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
         plot.add_lines(line_arr, **line_kwargs)
 
     def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+        """
+        Plots the Bézier surface control points using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        point_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+        """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
         plot.add_points(point_arr, **point_kwargs)
 
 
 class RationalBezierSurface(Surface):
+    """
+    Rational Bézier surface class. A NURBS surface with no internal knot vectors.
+    """
     def __init__(self,
                  points: typing.List[typing.List[Point3D]] or np.ndarray,
                  weights: np.ndarray,
@@ -944,12 +1481,31 @@ class RationalBezierSurface(Surface):
                 if weight < 0:
                     raise NegativeWeightError("All weights must be non-negative")
 
-        self.knots_u = knots_u
-        self.knots_v = knots_v
+        self._knots_u = knots_u
+        self._knots_v = knots_v
         self.weights = weights
         self.degree_u = degree_u
         self.degree_v = degree_v
-        self.Nu, self.Nv = len(points), len(points[0])
+
+    @property
+    def n_points_u(self) -> int:
+        """Number of points in the :math:`u`-direction"""
+        return len(self.points)
+
+    @property
+    def n_points_v(self) -> int:
+        """Number of points in the :math:`v`-direction"""
+        return len(self.points[0])
+
+    @property
+    def knots_u(self) -> np.ndarray:
+        """Knots in the :math:`u`-direction"""
+        return self._knots_u
+
+    @property
+    def knots_v(self) -> np.ndarray:
+        """Knots in the :math:`v`-direction"""
+        return self._knots_v
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.surfaces.RationalBSplineSurfaceIGES(
@@ -962,6 +1518,14 @@ class RationalBezierSurface(Surface):
         )
 
     def get_control_point_array(self) -> np.ndarray:
+        """
+        Converts the nested list of control points to a 3-D :obj:`~numpy.ndarray`.
+
+        Returns
+        -------
+        numpy.ndarray
+            3-D array
+        """
         return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
 
     def get_homogeneous_control_points(self) -> np.ndarray:
@@ -1025,7 +1589,7 @@ class RationalBezierSurface(Surface):
         # Extract projected control points and weights from array
         new_P, new_w = self.project_homogeneous_control_points(new_Pw)
 
-        return RationalBezierSurface.generate_from_array(new_P, new_w)
+        return RationalBezierSurface(new_P, new_w)
 
     def elevate_degree_v(self) -> "RationalBezierSurface":
         """
@@ -1056,16 +1620,29 @@ class RationalBezierSurface(Surface):
         # Extract projected control points and weights from array
         new_P, new_w = self.project_homogeneous_control_points(new_Pw)
 
-        return RationalBezierSurface.generate_from_array(new_P, new_w)
-
-    @classmethod
-    def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
-        return cls([
-            [Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in point_arr]
-            for point_arr in P], weights)
+        return RationalBezierSurface(new_P, new_w)
 
     @classmethod
     def from_bezier_revolve(cls, bezier: Bezier3D, axis: Line3D, start_angle: Angle, end_angle: Angle):
+        """
+        Creates a rational Bézier surface from the revolution of a Bézier curve about an axis.
+
+        Parameters
+        ----------
+        bezier: Bezier3D
+            Bézier curve to revolve
+        axis: Line3D
+            Axis of revolution
+        start_angle: Angle
+            Starting angle for the revolve
+        end_angle: Angle
+            Ending angle for the revolve
+
+        Returns
+        -------
+        RationalBezierSurface
+            Surface of revolution
+        """
 
         # if abs(end_angle.rad - start_angle.rad) > np.pi / 2:
         #     raise ValueError("Angle difference must be less than or equal to 90 degrees for a rational Bezier surface"
@@ -1123,32 +1700,227 @@ class RationalBezierSurface(Surface):
 
         return cls(control_points, weights)
 
-    def evaluate_ndarray(self, u: float, v: float):
+    @staticmethod
+    def fill_surface_from_four_boundaries(left_curve: Bezier3D or RationalBezierCurve3D,
+                                          right_curve: Bezier3D or RationalBezierCurve3D,
+                                          top_curve: Bezier3D or RationalBezierCurve3D,
+                                          bottom_curve: Bezier3D or RationalBezierCurve3D) -> "RationalBezierSurface":
+        """
+        Creates a fill surface from four boundary curves by linearly interpolating the ``left_curve`` and
+        ``right_curve`` and displacing the edges created by the interpolation to form the ``top_curve``
+        and ``bottom_curve`` boundaries.
+
+        .. figure:: ../images/fill_surface.*
+            :width: 600
+            :align: center
+
+        Fill surface from four curve boundaries
+
+        .. warning::
+
+            While this method works for non-planar sets of boundary curves, the primary intended use is for
+            co-planar boundary curves. Undesirable surface shapes may result if using non-planar curves.
+
+        Parameters
+        ----------
+        left_curve: Bezier3D or RationalBezierCurve3D
+            Left boundary curve
+        right_curve: Bezier3D or RationalBezierCurve3D
+            Right boundary curve
+        top_curve: Bezier3D or RationalBezierCurve3D
+            Top boundary curve
+        bottom_curve: Bezier3D or RationalBezierCurve3D
+            Bottom boundary curve
+
+        Returns
+        -------
+        RationalBezierSurface
+            Fill surface
+        """
+        # Convert the boundary curves to rational Bézier curves if they are non-rational
+        if isinstance(left_curve, Bezier3D):
+            left_curve = left_curve.to_rational_bezier_curve()
+        if isinstance(right_curve, Bezier3D):
+            right_curve = right_curve.to_rational_bezier_curve()
+        if isinstance(top_curve, Bezier3D):
+            top_curve = top_curve.to_rational_bezier_curve()
+        if isinstance(bottom_curve, Bezier3D):
+            bottom_curve = bottom_curve.to_rational_bezier_curve()
+
+        # Ensure the boundary curve loop is closed
+        left_cps = left_curve.get_homogeneous_control_points()
+        right_cps = right_curve.get_homogeneous_control_points()
+        top_cps = top_curve.get_homogeneous_control_points()
+        bottom_cps = bottom_curve.get_homogeneous_control_points()
+        corners = np.array([
+            left_cps[0],
+            left_cps[-1],
+            right_cps[0],
+            right_cps[-1],
+            top_cps[0],
+            top_cps[-1],
+            bottom_cps[0],
+            bottom_cps[-1]
+        ])
+        unique_corners = unique_with_tolerance(corners)
+        if len(unique_corners) > 4:
+            raise ValueError("Boundary curve loop is not closed")
+
+        # Re-orient the curves if necessary
+        if not (
+            all(np.isclose(left_cps[-1], top_cps[0])) or
+            all(np.isclose(left_cps[0], top_cps[0]))
+        ):
+            top_curve = top_curve.reverse()
+            if not (
+                all(np.isclose(left_cps[-1], top_cps[-1])) or
+                all(np.isclose(left_cps[0], top_cps[-1]))
+            ):
+                raise ValueError("Top curve and left curve are not connected")
+        else:
+            if not (
+                all(np.isclose(right_cps[-1], top_cps[-1])) or
+                all(np.isclose(right_cps[0], top_cps[-1])) or
+                all(np.isclose(right_cps[-1], top_cps[0])) or
+                all(np.isclose(right_cps[0], top_cps[0]))
+            ):
+                raise ValueError("Top curve and right curve are not connected")
+        if not (
+            all(np.isclose(left_cps[-1], bottom_cps[0])) or
+            all(np.isclose(left_cps[0], bottom_cps[0]))
+        ):
+            bottom_curve = bottom_curve.reverse()
+            if not (
+                all(np.isclose(left_cps[-1], bottom_cps[-1])) or
+                all(np.isclose(left_cps[0], bottom_cps[-1]))
+            ):
+                raise ValueError("Bottom curve and left curve are not connected")
+        else:
+            if not (
+                all(np.isclose(right_cps[-1], bottom_cps[-1])) or
+                all(np.isclose(right_cps[0], bottom_cps[-1])) or
+                all(np.isclose(right_cps[-1], bottom_cps[0])) or
+                all(np.isclose(right_cps[0], bottom_cps[0]))
+            ):
+                raise ValueError("Bottom curve and right curve are not connected")
+
+        # Elevate the curve degrees of the curve pairs so that they match internally
+        if left_curve.degree != right_curve.degree:
+            if left_curve.degree < right_curve.degree:
+                while left_curve.degree < right_curve.degree:
+                    left_curve = left_curve.elevate_degree()
+            else:
+                while right_curve.degree < left_curve.degree:
+                    right_curve = right_curve.elevate_degree()
+        if top_curve.degree != bottom_curve.degree:
+            if top_curve.degree < bottom_curve.degree:
+                while top_curve.degree < bottom_curve.degree:
+                    top_curve = top_curve.elevate_degree()
+            else:
+                while bottom_curve.degree < top_curve.degree:
+                    bottom_curve = bottom_curve.elevate_degree()
+
+        # Retrieve the new homogeneous control points for each (possibly modified) curve
+        left_cps = left_curve.get_homogeneous_control_points()
+        right_cps = right_curve.get_homogeneous_control_points()
+        top_cps = top_curve.get_homogeneous_control_points()
+        bottom_cps = bottom_curve.get_homogeneous_control_points()
+
+        # Linearly interpolate between the left and right curves, length equal to number of control points
+        # in the top/bottom direction
+        arrays_to_stack = []
+        for t in np.linspace(0.0, 1.0, top_curve.degree + 1):
+            arrays_to_stack.append(left_cps + t * (right_cps - left_cps))
+        Pw = np.array(arrays_to_stack)
+
+        # Displace the control points associated with the top side of the surface
+        for Pw_slice, curve_Pw in zip(Pw[1:-1], bottom_cps[1:-1]):
+            displacement = curve_Pw - Pw_slice[0]
+            for i in range(left_curve.degree):
+                Pw_slice[i] += (left_curve.degree - i) / left_curve.degree * displacement
+
+        # Displace the control points associated with the bottom side of the surface
+        for Pw_slice, curve_Pw in zip(Pw[1:-1], top_cps[1:-1]):
+            displacement = curve_Pw - Pw_slice[-1]
+            for i in range(left_curve.degree):
+                Pw_slice[-1 - i] += (left_curve.degree - i) / left_curve.degree * displacement
+
+        # Project the new homogeneous control points onto the w=1 hyperplane
+        new_points, new_weights = RationalBezierSurface.project_homogeneous_control_points(Pw)
+
+        return RationalBezierSurface(new_points, new_weights)
+
+    def evaluate(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the surface at a given :math:`(u,v)` parameter pair.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        numpy.ndarray
+            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
+        """
         P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_eval(P, self.weights, u, v))
 
-        # Evaluate the surface
-        point = np.zeros(P.shape[2])
-        wBuBv_sum = 0.0
-        for i in range(self.Nu):
-            for j in range(self.Nv):
-                Bu = bernstein_poly(self.degree_u, i, u)
-                Bv = bernstein_poly(self.degree_v, j, v)
-                wBuBv = Bu * Bv * self.weights[i, j]
-                wBuBv_sum += wBuBv
-                point += P[i, j, :] * wBuBv
+    def evaluate_point3d(self, u: float, v: float) -> Point3D:
+        r"""
+        Evaluates the rational Bézier surface at a single :math:`(u,v)` parameter pair and returns a point object.
 
-        return point / wBuBv_sum
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
 
-    def evaluate_simple(self, u: float, v: float):
-        return Point3D.from_array(self.evaluate_ndarray(u, v))
+        Returns
+        -------
+        Point3D
+            Point object corresponding to the :math:`(u,v)` pair
+        """
+        return Point3D.from_array(self.evaluate(u, v))
 
-    def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
-        U, V = np.meshgrid(np.linspace(0.0, 1.0, Nu), np.linspace(0.0, 1.0, Nv))
-        return np.array(
-            [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])]
-        )
+    def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the rational Bézier surface on a uniform :math:`N_u \times N_v` grid of parameter values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of uniformly spaced parameter values in the :math:`u`-direction
+        Nv: int
+            Number of uniformly spaced parameter values in the :math:`v`-direction
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_eval_grid(P, self.weights, Nu, Nv))
 
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> RationalBezierCurve3D:
+        """
+        Extracts the control points and weights from one of the four edges of the rational Bézier surface and
+        outputs a rational Bézier curve with these control points and weights
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which to extract the curve
+
+        Returns
+        -------
+        RationalBezierCurve3D
+            Rational Bézier curve with control points corresponding to the control points along the edge of the surface
+        """
         P = self.get_control_point_array()
         w = self.weights
 
@@ -1164,16 +1936,55 @@ class RationalBezierSurface(Surface):
         raise ValueError(f"Invalid surface edge {surface_edge}")
 
     def get_parallel_degree(self, surface_edge: SurfaceEdge):
+        r"""
+        Gets the degree of the curve corresponding to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree parallel to the edge
+        """
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_u
         return self.degree_v
 
     def get_perpendicular_degree(self, surface_edge: SurfaceEdge):
+        r"""
+        Gets the degree of the curve in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree perpendicular to the edge
+        """
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
             return self.degree_v
         return self.degree_u
 
     def get_corner_index(self, surface_corner: SurfaceCorner) -> (int, int):
+        """
+        Gets the :math:`i`- and :math:`j`-indices of the control point corresponding to the input corner
+
+        Parameters
+        ----------
+        surface_corner: SurfaceCorner
+            Corner from which to retrieve the index
+
+        Returns
+        -------
+        int, int
+            :math:`i`-index and :math:`j`-index, respectively
+        """
         if surface_corner == SurfaceCorner.u1v1:
             return self.degree_u, self.degree_v
         elif surface_corner == SurfaceCorner.u0v1:
@@ -1186,6 +1997,42 @@ class RationalBezierSurface(Surface):
             raise ValueError("Invalid surface_corner value")
 
     def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Gets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` rational
+        Bézier surface, the following code
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.v0)
+
+        returns the point :math:`\mathbf{P}_{2,1}` and
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.u1)
+
+        returns the point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.set_point`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+
+        Returns
+        -------
+        Point3D
+            Point used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
         if surface_edge == SurfaceEdge.v1:
             return self.points[row_index][-(continuity_index + 1)]
         elif surface_edge == SurfaceEdge.v0:
@@ -1198,6 +2045,41 @@ class RationalBezierSurface(Surface):
             raise ValueError("Invalid surface_edge value")
 
     def set_point(self, point: Point3D, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5`
+        rational Bézier surface, the following code
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of point :math:`\mathbf{P}_{2,1}` to :math:`[3,4,5]^T` and
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` to :math:`[3,4,5]^T`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.get_point`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        point: Point3D
+            Point object to apply at the specified indices
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+        """
         if surface_edge == SurfaceEdge.v1:
             self.points[row_index][-(continuity_index + 1)] = point
         elif surface_edge == SurfaceEdge.v0:
@@ -1209,7 +2091,43 @@ class RationalBezierSurface(Surface):
         else:
             raise ValueError("Invalid surface_edge value")
 
-    def get_weight(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+    def get_weight(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> float:
+        r"""
+        Gets the weight corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` rational
+        Bézier surface, the following code
+
+        .. code-block:: python
+
+            w = surf.get_weight(2, 1, ac.SurfaceEdge.v0)
+
+        returns the weight :math:`w_{2,1}` and
+
+        .. code-block:: python
+
+            w = surf.get_weight(2, 1, ac.SurfaceEdge.u1)
+
+        returns the weight :math:`w_{6-1,2} = w_{5,2}`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.set_weight`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge weights
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the weight
+
+        Returns
+        -------
+        float
+            Weight used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
         if surface_edge == SurfaceEdge.v1:
             return self.weights[row_index][-(continuity_index + 1)]
         elif surface_edge == SurfaceEdge.v0:
@@ -1222,6 +2140,39 @@ class RationalBezierSurface(Surface):
             raise ValueError("Invalid surface_edge value")
 
     def set_weight(self, weight: float, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the weight corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5`
+        rational Bézier surface, the following code
+
+        .. code-block:: python
+
+            surf.set_weight(0.9, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of weight :math:`w_{2,1}` to :math:`0.9` and
+
+        .. code-block:: python
+
+            surf.set_weight(1.1, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of weight :math:`w_{6-1,2} = w_{5,2}` to :math:`1.1`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.get_weight`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        weight: float
+            Weight to apply at the specified indices
+        row_index: int
+            Index along the surface edge weights
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the weight
+        """
         if surface_edge == SurfaceEdge.v1:
             self.weights[row_index][-(continuity_index + 1)] = weight
         elif surface_edge == SurfaceEdge.v0:
@@ -1235,18 +2186,103 @@ class RationalBezierSurface(Surface):
 
     def enforce_g0(self, other: "RationalBezierSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Enforces :math:`G^0` continuity along the input ``surface_edge`` by equating the control points
+        and weights along this edge to the corresponding control points and weights along the ``other_surface_edge``
+        of the rational Bézier surface given by ``other``.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. important::
+
+            The parallel degree of the current surface along ``surface_edge`` must be equal to the parallel degree
+            of the ``other`` surface along ``other_surface_edge``, otherwise an ``AssertionError`` will be raised.
+            If these degrees are not equal, first elevate the degree of the surface with the lower parallel degree
+            until the degrees match using either :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.elevate_degree_u`
+            or :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.elevate_degree_v`, whichever is appropriate.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_c0`
+                Parametric continuity equivalent (:math:`C^0`)
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         # P^b[:, 0] = P^a[:, -1]
-        assert self.get_parallel_degree(surface_edge) == other.get_parallel_degree(other_surface_edge)
+        self_parallel_degree = self.get_parallel_degree(surface_edge)
+        other_parallel_degree = other.get_parallel_degree(other_surface_edge)
+        if self_parallel_degree != other_parallel_degree:
+            raise ValueError(f"Degree parallel to the edge of the input surface ({self_parallel_degree}) does "
+                             f"not match the degree parallel to the edge of the other surface "
+                             f"({other_parallel_degree})")
         for row_index in range(self.get_parallel_degree(surface_edge) + 1):
             self.set_point(other.get_point(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
             self.set_weight(other.get_weight(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
 
     def enforce_c0(self, other: "RationalBezierSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        """
+        For zeroth-degree continuity, there is no difference between geometric (:math:`G^0`) and parametric
+        (:math:`C^0`) continuity. Because this method is simply a convenience method that calls
+        :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0`, see the documentation for that method for more
+        detailed documentation.
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0(other, surface_edge, other_surface_edge)
 
     def enforce_g0g1(self, other: "RationalBezierSurface", f: float or np.ndarray,
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` continuity, then tangent (:math:`G^1`) continuity is enforced according to
+        the following equations:
 
+        .. math::
+
+            \mathcal{W}^{b,\mathcal{E}_b}_{k,1} = \mathcal{W}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \left( \mathcal{W}^{a,\mathcal{E}_a}_{k,0} - \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \right) \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,1} = \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,0}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}} \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \frac{1}{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}} \left[\mathcal{W}^{a,\mathcal{E}_a}_{k,0} \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - \mathcal{P}^{a,\mathcal{E}_a}_{k,1} \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \right] \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0`
+                Geometric point continuity enforcement (:math:`G^0`)
+            :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_c0c1`
+                Parametric continuity equivalent (:math:`C^1`)
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         if isinstance(f, np.ndarray):
             assert len(f) == self.get_parallel_degree(surface_edge) + 1
 
@@ -1276,6 +2312,20 @@ class RationalBezierSurface(Surface):
 
     def enforce_c0c1(self, other: "RationalBezierSurface",
                      surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0g1` with ``f=1.0``. See that
+        method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
 
     def enforce_g0g1_multiface(self, f: float,
@@ -1287,6 +2337,43 @@ class RationalBezierSurface(Surface):
 
     def enforce_g0g1g2(self, other: "RationalBezierSurface", f: float or np.ndarray,
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` and :math:`G^1` continuity, then curvature (:math:`G^2`) continuity is enforced
+        according to the following equations:
+
+        .. math::
+
+            \mathcal{W}^{b,\mathcal{E}_b}_{k,2} = 2 \mathcal{W}^{b,\mathcal{E}_b}_{k,1} - \mathcal{W}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \left[ \mathcal{W}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{W}^{a,\mathcal{E}_a}_{k,1} + \mathcal{W}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,2} = 2 \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \mathcal{P}^{b,\mathcal{E}_b}_{k,1} - \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,0}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \frac{1}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \left[ \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \mathcal{P}^{a,\mathcal{E}_a}_{k,1} + \mathcal{W}^{a,\mathcal{E}_a}_{k,2} \mathcal{P}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+         :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0`
+             Geometric point continuity enforcement (:math:`G^0`)
+         :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0g1`
+             Geometric tangent continuity enforcement (:math:`G^1`)
+         :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_c0c1c2`
+             Parametric continuity equivalent (:math:`C^2`)
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
         n_ratio = (other.get_perpendicular_degree(other_surface_edge) ** 2 -
                    other.get_perpendicular_degree(other_surface_edge)) / (
@@ -1322,296 +2409,359 @@ class RationalBezierSurface(Surface):
 
     def enforce_c0c1c2(self, other: "RationalBezierSurface",
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.enforce_g0g1g2` with ``f=1.0``.
+        See that method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: RationalBezierSurface
+            Another rational Bézier surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
 
-    @staticmethod
-    def _cast_uv(u: float or np.ndarray, v: float or np.ndarray) -> (float, float) or (np.ndarray, np.ndarray):
-        if not isinstance(u, np.ndarray):
-            u = np.array([u])
-        if not isinstance(v, np.ndarray):
-            v = np.array([v])
+    def dSdu(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` at a single :math:`(u,v)` pair
 
-        #print(f"{u=},{v=}")
-        return u, v
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
 
-    def dSdu_v2(self, u: float, v: float):
-        n, m = self.degree_u, self.degree_v
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
         P = self.get_control_point_array()
-        w = self.weights
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_dsdu(P, self.weights, u, v))
 
-        A_1 = np.zeros(P.shape[2])
-        A_2 = np.zeros(P.shape[2])
-        B_1 = np.zeros(P.shape[2])
-        B_2 = np.zeros(P.shape[2])
+    def dSdu_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
 
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                dbudu = self.degree_u * (
-                            bernstein_poly(self.degree_u - 1, i - 1, u) - bernstein_poly(self.degree_u - 1, i, u))
-                A_1 += bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * w[i, j]
-                A_2 += dbudu * bernstein_poly(m, j, v) * w[i, j] * P[i, j, :]
-                B_1 += bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * w[i, j] * P[i, j, :]
-                B_2 += dbudu * bernstein_poly(m, j, v) * w[i, j]
-        A = A_1 * A_2
-        B = B_1 * B_2
-        return (A - B) / (A_1 ** 2)
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
 
-    def dSdv_v2(self, u: float, v: float):
-        n, m = self.degree_u, self.degree_v
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
         P = self.get_control_point_array()
-        w = self.weights
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_dsdu_grid(P, self.weights, Nu, Nv))
 
-        A_1 = np.zeros(P.shape[2])
-        A_2 = np.zeros(P.shape[2])
-        B_1 = np.zeros(P.shape[2])
-        B_2 = np.zeros(P.shape[2])
+    def dSdu_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
 
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                dbvdv = m * (bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v))
-                A_1 += bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * w[i, j]
-                A_2 += bernstein_poly(n, i, u) * dbvdv * w[i, j] * P[i, j, :]
-                B_1 += bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * w[i, j] * P[i, j, :]
-                B_2 += bernstein_poly(n, i, u) * dbvdv * w[i, j]
-        A = A_1 * A_2
-        B = B_1 * B_2
-        return (A - B) / (A_1 ** 2)
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
 
-    def dSdu(self, u: float or np.ndarray, v: float or np.ndarray):
-        n, m = self.degree_u, self.degree_v
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
         P = self.get_control_point_array()
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
-
-        weight_arr = np.array([[bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * self.weights[i, j]
-                                for j in range(m + 1)] for i in range(n + 1)])
-        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
-
-        point_arr = np.array([[np.array([(bernstein_poly(n, i, u) * bernstein_poly(m, j, v) *
-                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
-                               for j in range(m + 1)] for i in range(n + 1)])
-        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
-
-        point_arr_deriv = np.array([[np.array([((bernstein_poly(n - 1, i - 1, u) - bernstein_poly(n - 1, i, u)) *
-                                                bernstein_poly(m, j, v) * self.weights[i, j])]).T @
-                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
-
-        weight_arr_deriv = np.array([[(bernstein_poly(n - 1, i - 1, u) - bernstein_poly(n - 1, i, u)) *
-                                      bernstein_poly(m, j, v) * self.weights[i, j]
-                                      for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
-
-        A = n * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
-        B = n * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
-        W = np.tile(weight_sum ** 2, (3, 1)).T
-
-        return (A - B) / W
+        return np.array(rational_bezier_surf_dsdu_uvvecs(P, self.weights, u, v))
 
     def dSdv(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the first derivative with respect to :math:`v` at a single :math:`(u,v)` pair
 
-        n, m = self.degree_u, self.degree_v
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
         P = self.get_control_point_array()
-        #assert type(u) == type(v)
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_dsdv(P, self.weights, u, v))
 
-        weight_arr = np.array([[bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * self.weights[i, j]
-                                for j in range(m + 1)] for i in range(n + 1)])
-        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
+    def dSdv_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
 
-        point_arr = np.array([[np.array([(bernstein_poly(n, i, u) * bernstein_poly(m, j, v) *
-                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
-                               for j in range(m + 1)] for i in range(n + 1)])
-        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
 
-        point_arr_deriv = np.array([[np.array([((bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v)) *
-                                                bernstein_poly(n, i, u) * self.weights[i, j])]).T @
-                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
-
-        weight_arr_deriv = np.array([[(bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v)) *
-                                      bernstein_poly(n, i, u) * self.weights[i, j]
-                                      for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
-
-        A = m * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
-        B = m * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
-        W = np.tile(weight_sum ** 2, (3, 1)).T
-
-        return (A - B) / W
-
-    def d2Sdu2(self, u: float or np.ndarray, v: float or np.ndarray):
-        n, m = self.degree_u, self.degree_v
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
         P = self.get_control_point_array()
-        #assert type(u) == type(v)
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_dsdv_grid(P, self.weights, Nu, Nv))
 
-        weight_arr = np.array([[bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * self.weights[i, j]
-                                for j in range(m + 1)] for i in range(n + 1)])
-        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
+    def dSdv_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
 
-        point_arr = np.array([[np.array([(bernstein_poly(n, i, u) * bernstein_poly(m, j, v) *
-                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
-                               for j in range(m + 1)] for i in range(n + 1)])
-        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
 
-        point_arr_deriv = np.array([[np.array([((bernstein_poly(n - 1, i - 1, u) - bernstein_poly(n - 1, i, u)) *
-                                                bernstein_poly(m, j, v) * self.weights[i, j])]).T @
-                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_dsdv_uvvecs(P, self.weights, u, v))
 
-        weight_arr_deriv = np.array([[(bernstein_poly(n - 1, i - 1, u) - bernstein_poly(n - 1, i, u)) *
-                                      bernstein_poly(m, j, v) * self.weights[i, j]
-                                      for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
+    def d2Sdu2(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` at a single :math:`(u,v)` pair
 
-        point_arr_deriv2 = np.array([[np.array([((bernstein_poly(n - 2, i - 2, u) -
-                                                  2 * bernstein_poly(n - 2, i - 1, u) +
-                                                  bernstein_poly(n - 2, i, u)) *
-                                                 bernstein_poly(m, j, v) * self.weights[i, j])]).T @
-                                      np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv2_sum = point_arr_deriv2.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
 
-        weight_arr_deriv2 = np.array([[(bernstein_poly(n - 2, i - 2, u) -
-                                        2 * bernstein_poly(n - 2, i - 1, u) +
-                                        bernstein_poly(n - 2, i, u)) *
-                                       bernstein_poly(m, j, v) * self.weights[i, j]
-                                       for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv2_sum = weight_arr_deriv2.reshape(-1, weight_arr_deriv2.shape[-1]).sum(axis=0)
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdu2(P, self.weights, u, v))
 
-        A = n * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
-        B = n * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
-        W = np.tile(weight_sum ** 2, (3, 1)).T
+    def d2Sdu2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
 
-        dA = n ** 2 * np.tile(weight_deriv_sum, (3, 1)).T * point_deriv_sum + np.tile(
-            weight_sum, (3, 1)).T * point_deriv2_sum
-        dB = n ** 2 * point_deriv_sum * np.tile(weight_deriv_sum, (3, 1)).T + point_sum * np.tile(
-            weight_deriv2_sum, (3, 1)).T
-        dW = 2 * n * np.tile(weight_sum, (3, 1)).T * np.tile(weight_deriv_sum, (3, 1)).T
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
 
-        return (W * (dA - dB) - dW * (A - B)) / W ** 2
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdu2_grid(P, self.weights, Nu, Nv))
+
+    def d2Sdu2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdu2_uvvecs(P, self.weights, u, v))
 
     def d2Sdv2(self, u: float or np.ndarray, v: float or np.ndarray):
-        n, m = self.degree_u, self.degree_v
+        r"""
+        Evaluates the second derivative with respect to :math:`v` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
         P = self.get_control_point_array()
-        #assert type(u) == type(v)
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_d2sdv2(P, self.weights, u, v))
 
-        weight_arr = np.array([[bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * self.weights[i, j]
-                                for j in range(m + 1)] for i in range(n + 1)])
-        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
+    def d2Sdv2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
 
-        point_arr = np.array([[np.array([(bernstein_poly(n, i, u) * bernstein_poly(m, j, v) *
-                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
-                               for j in range(m + 1)] for i in range(n + 1)])
-        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
 
-        point_arr_deriv = np.array([[np.array([((bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v)) *
-                                                bernstein_poly(n, i, u) * self.weights[i, j])]).T @
-                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdv2_grid(P, self.weights, Nu, Nv))
 
-        weight_arr_deriv = np.array([[(bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v)) *
-                                      bernstein_poly(n, i, u) * self.weights[i, j]
-                                      for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
+    def d2Sdv2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
 
-        point_arr_deriv2 = np.array([[np.array([((bernstein_poly(m - 2, j - 2, v) -
-                                                  2 * bernstein_poly(m - 2, j - 1, v) +
-                                                  bernstein_poly(m - 2, j, v)) *
-                                                 bernstein_poly(n, i, u) * self.weights[i, j])]).T @
-                                      np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv2_sum = point_arr_deriv2.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
 
-        weight_arr_deriv2 = np.array([[(bernstein_poly(m - 2, j - 2, v) -
-                                        2 * bernstein_poly(m - 2, j - 1, v) +
-                                        bernstein_poly(m - 2, j, v)) *
-                                       bernstein_poly(n, i, u) * self.weights[i, j]
-                                       for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv2_sum = weight_arr_deriv2.reshape(-1, weight_arr_deriv2.shape[-1]).sum(axis=0)
-
-        A = m * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
-        B = m * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
-        W = np.tile(weight_sum ** 2, (3, 1)).T
-
-        dA = m ** 2 * np.tile(weight_deriv_sum, (3, 1)).T * point_deriv_sum + np.tile(
-            weight_sum, (3, 1)).T * point_deriv2_sum
-        dB = m ** 2 * point_deriv_sum * np.tile(weight_deriv_sum, (3, 1)).T + point_sum * np.tile(
-            weight_deriv2_sum, (3, 1)).T
-        dW = 2 * m * np.tile(weight_sum, (3, 1)).T * np.tile(weight_deriv_sum, (3, 1)).T
-
-        return (W * (dA - dB) - dW * (A - B)) / W ** 2
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdv2_uvvecs(P, self.weights, u, v))
 
     def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
+        r"""
+        Evaluates the surface at ``n_points`` parameter locations along a given edge.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the edge curve. Default: 10
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([self.evaluate_ndarray(u, 1.0) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_eval_iso_v(P, self.weights, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([self.evaluate_ndarray(u, 0.0) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_eval_iso_v(P, self.weights, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([self.evaluate_ndarray(1.0, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_eval_iso_u(P, self.weights, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([self.evaluate_ndarray(0.0, v) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_eval_iso_u(P, self.weights, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
-    def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
+    def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular derivative along a surface edge at ``n_points`` parameter locations.
+        The derivative represents either :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}` or
+        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([(self.dSdv(u, 1.0) if perp else
-                              self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_dsdv_iso_v(P, self.weights, n_points, 1.0)) if perp else np.array(
+                rational_bezier_surf_dsdu_iso_v(P, self.weights, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([(self.dSdv(u, 0.0) if perp else
-                              self.dSdu(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_dsdv_iso_v(P, self.weights, n_points, 0.0)) if perp else np.array(
+                rational_bezier_surf_dsdu_iso_v(P, self.weights, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([(self.dSdu(1.0, v) if perp else
-                              self.dSdv(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_dsdu_iso_u(P, self.weights, 1.0, n_points)) if perp else np.array(
+                rational_bezier_surf_dsdv_iso_u(P, self.weights, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([(self.dSdu(0.0, v) if perp else
-                              self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_dsdu_iso_u(P, self.weights, 0.0, n_points)) if perp else np.array(
+                rational_bezier_surf_dsdv_iso_u(P, self.weights, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
-    def get_first_derivs_along_edge_v2(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
-        if edge == SurfaceEdge.v1:
-            return np.array([(self.dSdv_v2(u, 1.0) if perp else
-                              self.dSdu_v2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
-        elif edge == SurfaceEdge.v0:
-            return np.array([(self.dSdv_v2(u, 0.0) if perp else
-                              self.dSdu_v2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
-        elif edge == SurfaceEdge.u1:
-            return np.array([(self.dSdu_v2(1.0, v) if perp else
-                              self.dSdv_v2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
-        elif edge == SurfaceEdge.u0:
-            return np.array([(self.dSdu_v2(0.0, v) if perp else
-                              self.dSdv_v2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
-        else:
-            raise ValueError(f"No edge called {edge}")
+    def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular second derivative along a surface edge at ``n_points`` parameter
+        locations. The derivative represents either :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}` or
+        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}` depending on which edge is selected and which value is
+        assigned to ``perp``.
 
-    def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the second derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the second derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([(self.d2Sdv2(u, 1.0) if perp else
-                              self.d2Sdu2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_d2sdv2_iso_v(P, self.weights, n_points, 1.0)) if perp else np.array(
+                rational_bezier_surf_d2sdu2_iso_v(P, self.weights, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([(self.d2Sdv2(u, 0.0) if perp else
-                              self.d2Sdu2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_d2sdv2_iso_v(P, self.weights, n_points, 0.0)) if perp else np.array(
+                rational_bezier_surf_d2sdu2_iso_v(P, self.weights, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([(self.d2Sdu2(1.0, v) if perp else
-                              self.d2Sdv2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_d2sdu2_iso_u(P, self.weights, 1.0, n_points)) if perp else np.array(
+                rational_bezier_surf_d2sdv2_iso_u(P, self.weights, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([(self.d2Sdu2(0.0, v) if perp else
-                              self.d2Sdv2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_d2sdu2_iso_u(P, self.weights, 0.0, n_points)) if perp else np.array(
+                rational_bezier_surf_d2sdv2_iso_u(P, self.weights, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
@@ -1779,11 +2929,11 @@ class RationalBezierSurface(Surface):
             raise ValueError("Did not detect an x, y, or z input")
 
         def root_find_func_u(u_current):
-            point = self.evaluate_simple(u_current, v)
+            point = self.evaluate_point3d(u_current, v)
             return np.array([getattr(point, xyz).m - xyz_val])
 
         def root_find_func_v(v_current):
-            point = self.evaluate_simple(u, v_current)
+            point = self.evaluate_point3d(u, v_current)
             return np.array([getattr(point, xyz).m - xyz_val])
 
         if v is not None:
@@ -1823,10 +2973,10 @@ class RationalBezierSurface(Surface):
             return de_casteljau(i, j - 1, k) * (1 - u0) + de_casteljau(i + 1, j - 1, k) * u0
 
         bez_surf_split_1_Pw = np.array([
-            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
         ])
         bez_surf_split_2_Pw = np.array([
-            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
         ])
 
         transposed_Pw_1 = np.transpose(bez_surf_split_1_Pw, (1, 0, 2))
@@ -1836,8 +2986,8 @@ class RationalBezierSurface(Surface):
         P2, w2 = self.project_homogeneous_control_points(transposed_Pw_2)
 
         return (
-            RationalBezierSurface.generate_from_array(P1, w1),
-            RationalBezierSurface.generate_from_array(P2, w2)
+            RationalBezierSurface(P1, w1),
+            RationalBezierSurface(P2, w2)
         )
 
     def split_at_v(self, v0: float) -> ("BezierSurface", "BezierSurface"):
@@ -1871,32 +3021,40 @@ class RationalBezierSurface(Surface):
             return de_casteljau(i, j - 1, k) * (1 - v0) + de_casteljau(i + 1, j - 1, k) * v0
 
         bez_surf_split_1_Pw = np.array([
-            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
         ])
         bez_surf_split_2_Pw = np.array([
-            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
         ])
 
         P1, w1 = self.project_homogeneous_control_points(bez_surf_split_1_Pw)
         P2, w2 = self.project_homogeneous_control_points(bez_surf_split_2_Pw)
 
         return (
-            RationalBezierSurface.generate_from_array(P1, w1),
-            RationalBezierSurface.generate_from_array(P2, w2)
+            RationalBezierSurface(P1, w1),
+            RationalBezierSurface(P2, w2)
         )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
+        """
+        Generates a list of :obj:`~aerocaps.geom.point.Point3D` and :obj:`~aerocaps.geom.curves.Line3D` objects
+        representing the rational Bézier surface's control points and connections between them
 
+        Returns
+        -------
+        typing.List[Point3D], typing.List[Line3D]
+            Control points and lines between adjacent control points in flattened lists
+        """
         control_points = self.get_control_point_array()
         points = []
         lines = []
 
-        for i in range(self.Nu):
-            for j in range(self.Nv):
+        for i in range(self.n_points_u):
+            for j in range(self.n_points_v):
                 points.append(Point3D.from_array(control_points[i, j, :]))
 
-        for i in range(self.Nu - 1):
-            for j in range(self.Nv - 1):
+        for i in range(self.n_points_u - 1):
+            for j in range(self.n_points_v - 1):
                 point_obj_1 = Point3D.from_array(control_points[i, j, :])
                 point_obj_2 = Point3D.from_array(control_points[i + 1, j, :])
                 point_obj_3 = Point3D.from_array(control_points[i, j + 1, :])
@@ -1905,7 +3063,7 @@ class RationalBezierSurface(Surface):
                 line_2 = Line3D(p0=point_obj_1, p1=point_obj_3)
                 lines.extend([line_1, line_2])
 
-                if i < self.Nu - 2 and j < self.Nv - 2:
+                if i < self.n_points_u - 2 and j < self.n_points_v - 2:
                     continue
 
                 point_obj_4 = Point3D.from_array(control_points[i + 1, j + 1, :])
@@ -1915,59 +3073,139 @@ class RationalBezierSurface(Surface):
 
         return points, lines
 
-    def plot_surface(self, plot: pv.Plotter, **mesh_kwargs):
-        XYZ = self.evaluate(50, 50)
+    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs):
+        """
+        Plots the rational Bézier surface using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        Nu: int
+            Number of points to evaluate in the :math:`u`-parametric direction. Default: ``50``
+        Nv: int
+            Number of points to evaluate in the :math:`v`-parametric direction. Default: ``50``
+        mesh_kwargs:
+            Keyword arguments to pass to :obj:`pyvista.Plotter.add_mesh`
+
+        Returns
+        -------
+        pyvista.core.pointset.StructuredGrid
+            The evaluated rational Bézier surface
+        """
+        XYZ = self.evaluate_grid(Nu, Nv)
         grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
         plot.add_mesh(grid, **mesh_kwargs)
         return grid
 
     def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+        """
+        Plots the network of lines connecting the rational Bézier surface control points using the
+        `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        line_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+        """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
         plot.add_lines(line_arr, **line_kwargs)
 
     def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+        """
+        Plots the rational Bézier surface control points using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        point_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+        """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
         plot.add_points(point_arr, **point_kwargs)
 
 
-class NURBSSurface(Surface):
+class BSplineSurface(Surface):
+    """
+    B-spline surface class
+    """
     def __init__(self,
-                 control_points: np.ndarray,
+                 points: typing.List[typing.List[Point3D]] or np.ndarray,
                  knots_u: np.ndarray,
                  knots_v: np.ndarray,
-                 weights: np.ndarray,
-                 degree_u: int, degree_v: int,
                  ):
-        assert control_points.ndim == 3
+        if isinstance(points, np.ndarray):
+            points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
+        self.points = points
         assert knots_u.ndim == 1
         assert knots_v.ndim == 1
-        assert weights.ndim == 2
-        assert len(knots_u) == control_points.shape[0] + degree_u + 1
-        assert len(knots_v) == control_points.shape[1] + degree_v + 1
-        assert control_points[:, :, 0].shape == weights.shape
 
-        # Negative weight check
-        for weight_row in weights:
-            for weight in weight_row:
-                if weight < 0:
-                    raise NegativeWeightError("All weights must be non-negative")
-
-        self.control_points = control_points
         self.knots_u = knots_u
         self.knots_v = knots_v
-        self.weights = weights
-        self.degree_u = degree_u
-        self.degree_v = degree_v
-        self.Nu, self.Nv = control_points.shape[0], control_points.shape[1]
-        self.possible_spans_u, self.possible_span_indices_u = self._get_possible_spans(self.knots_u)
-        self.possible_spans_v, self.possible_span_indices_v = self._get_possible_spans(self.knots_v)
+
+        self._weights = np.ones((len(points), len(points[0])))
+
+    @property
+    def n_points_u(self) -> int:
+        """Number of control points in the :math:`u`-parametric direction"""
+        return len(self.points)
+
+    @property
+    def n_points_v(self) -> int:
+        """Number of control points in the :math:`v`-parametric direction"""
+        return len(self.points[0])
+
+    @property
+    def degree_u(self) -> int:
+        """Surface degree in the :math:`u`-parametric direction"""
+        return len(self.knots_u) - self.n_points_u - 1
+
+    @property
+    def degree_v(self) -> int:
+        """Surface degree in the :math:`v`-parametric direction"""
+        return len(self.knots_v) - self.n_points_v - 1
+
+    @property
+    def n(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.BSplineSurface.degree_u`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`u`-parametric direction
+        """
+        return self.degree_u
+
+    @property
+    def m(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.BSplineSurface.degree_v`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`v`-parametric direction
+        """
+        return self.degree_v
+
+    @property
+    def weights(self) -> np.ndarray:
+        """Weight matrix (all ones for this surface type)"""
+        return self._weights
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        """
+        Exports the NURBS surface to an IGES entity
+        """
         return aerocaps.iges.surfaces.RationalBSplineSurfaceIGES(
-            control_points=self.control_points,
+            control_points=self.get_control_point_array(),
             knots_u=self.knots_u,
             knots_v=self.knots_v,
             weights=self.weights,
@@ -1975,11 +3213,1088 @@ class NURBSSurface(Surface):
             degree_v=self.degree_v
         )
 
-    @classmethod
-    def from_bezier_revolve(cls, bezier: Bezier3D, axis: Line3D, start_angle: Angle, end_angle: Angle):
+    def get_control_point_array(self) -> np.ndarray:
+        r"""
+        Gets the control points in float array form.
 
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
+
+    def evaluate(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the surface at a given :math:`(u,v)` parameter pair.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        numpy.ndarray
+            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_eval(P, self.knots_u, self.knots_v, u, v))
+
+    def evaluate_point3d(self, u: float, v: float) -> Point3D:
+        r"""
+        Evaluates the B-spline surface at a single :math:`(u,v)` parameter pair and returns a point object.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        Point3D
+            Point object corresponding to the :math:`(u,v)` pair
+        """
+        return Point3D.from_array(self.evaluate(u, v))
+
+    def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the B-spline surface on a uniform :math:`N_u \times N_v` grid of parameter values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of uniformly spaced parameter values in the :math:`u`-direction
+        Nv: int
+            Number of uniformly spaced parameter values in the :math:`v`-direction
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_eval_grid(P, self.knots_u, self.knots_v, Nu, Nv))
+
+    def get_parallel_control_point_length(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the number of control points of the curve corresponding to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the number of control points is computed
+
+        Returns
+        -------
+        int
+            Number of control points parallel to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.n_points_u
+        return self.n_points_v
+
+    def get_perpendicular_control_point_length(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the number of control points in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the number of perpendicular control points is computed
+
+        Returns
+        -------
+        int
+            Number of control points perpendicular to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.n_points_v
+        return self.n_points_u
+
+    def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the degree of the curve corresponding to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree parallel to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.degree_u
+        return self.degree_v
+
+    def get_perpendicular_degree(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the degree of the curve in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree perpendicular to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.degree_v
+        return self.degree_u
+
+    def get_parallel_knots(self, surface_edge: SurfaceEdge) -> np.ndarray:
+        r"""
+        Gets the knots in the parametric direction parallel to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel knots are returned
+
+        Returns
+        -------
+        numpy.ndarray
+            Knots parallel to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.knots_u
+        return self.knots_v
+
+    def get_perpendicular_knots(self, surface_edge: SurfaceEdge) -> np.ndarray:
+        r"""
+        Gets the knots in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular knots are returned
+
+        Returns
+        -------
+        numpy.ndarray
+            Knots perpendicular to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.knots_v
+        return self.knots_u
+
+    def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> Point3D:
+        r"""
+        Gets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` B-spline surface,
+        the following code
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.v0)
+
+        returns the point :math:`\mathbf{P}_{2,1}` and
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.u1)
+
+        returns the point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` if there are no internal knot vectors.
+        If the B-spline surface has internal knot vectors, the actual :math:`i`-index of the point may be different,
+        but the second-to-last point in the third row of control points will still be returned.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BSplineSurface.set_point`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+
+        Returns
+        -------
+        Point3D
+            Point used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
+        if surface_edge == SurfaceEdge.v1:
+            return self.points[row_index][-(continuity_index + 1)]
+        elif surface_edge == SurfaceEdge.v0:
+            return self.points[row_index][continuity_index]
+        elif surface_edge == SurfaceEdge.u1:
+            return self.points[-(continuity_index + 1)][row_index]
+        elif surface_edge == SurfaceEdge.u0:
+            return self.points[continuity_index][row_index]
+        else:
+            raise ValueError("Invalid surface_edge value")
+
+    def set_point(self, point: Point3D, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` B-spline surface,
+        the following code
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of point :math:`\mathbf{P}_{2,1}` to :math:`[3,4,5]^T` and
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.get_point(p, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` to :math:`[3,4,5]^T` if there are no
+        internal knot vectors.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BSplineSurface.get_point`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        point: Point3D
+            Point object to apply at the specified indices
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+        """
+        if surface_edge == SurfaceEdge.v1:
+            self.points[row_index][-(continuity_index + 1)] = point
+        elif surface_edge == SurfaceEdge.v0:
+            self.points[row_index][continuity_index] = point
+        elif surface_edge == SurfaceEdge.u1:
+            self.points[-(continuity_index + 1)][row_index] = point
+        elif surface_edge == SurfaceEdge.u0:
+            self.points[continuity_index][row_index] = point
+        else:
+            raise ValueError("Invalid surface_edge value")
+
+    def extract_edge_curve(self, surface_edge: SurfaceEdge) -> BSpline3D:
+        """
+        Extracts the control points, weights, and knots from one of the four edges of the B-spline surface and
+        outputs a B-spline curve with these control points and weights
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which to extract the curve
+
+        Returns
+        -------
+        BSpline3D
+            B-spline curve with control points and knots corresponding to the control points and knots
+            along the edge of the surface
+        """
+        P = self.get_control_point_array()
+
+        if surface_edge == SurfaceEdge.u0:
+            return BSpline3D(P[0, :, :], self.knots_v, self.degree_v)
+        if surface_edge == SurfaceEdge.u1:
+            return BSpline3D(P[-1, :, :], self.knots_v, self.degree_v)
+        if surface_edge == SurfaceEdge.v0:
+            return BSpline3D(P[:, 0, :], self.knots_u, self.degree_u)
+        if surface_edge == SurfaceEdge.v1:
+            return BSpline3D(P[:, -1, :], self.knots_u, self.degree_u)
+
+        raise ValueError(f"Invalid surface edge {surface_edge}")
+
+    def enforce_g0(self, other: "BSplineSurface",
+                   surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Enforces :math:`G^0` continuity along the input ``surface_edge`` by equating the control points
+        along this edge to the corresponding control points and weights along the ``other_surface_edge``
+        of the B-spline surface given by ``other``.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. important::
+
+            The parallel degree of the current surface along ``surface_edge`` must be equal to the parallel degree
+            of the ``other`` surface along ``other_surface_edge``, otherwise an ``AssertionError`` will be raised.
+            Additionally, the knot vector along the ``surface_edge`` of the current surface must be equal
+            to the knot vector along the ``other_surface_edge`` of the other surface.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BSplineSurface.enforce_c0`
+                Parametric continuity equivalent (:math:`C^0`)
+
+        Parameters
+        ----------
+        other: BSplineSurface
+            Another B-spline surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        # P^b[:, 0] = P^a[:, -1]
+        self_parallel_knots = self.get_parallel_knots(surface_edge)
+        other_parallel_knots = other.get_parallel_knots(other_surface_edge)
+        self_parallel_degree = self.get_parallel_degree(surface_edge)
+        other_parallel_degree = other.get_parallel_degree(other_surface_edge)
+        if len(self_parallel_knots) != len(other_parallel_knots):
+            raise ValueError(f"Length of the knot vector parallel to the edge of the input surface "
+                             f"({len(self_parallel_knots)}) is not equal to the length of the knot vector "
+                             f"parallel to the edge of the other surface ({len(other_parallel_knots)})")
+        if any([k1 != k2 for k1, k2 in zip(self_parallel_knots, other_parallel_knots)]):
+            raise ValueError(f"Knots parallel to the edge of the input surface ({self_parallel_knots}) "
+                             f"are not equal to the knots in the direction parallel to the edge of the other "
+                             f"surface ({other_parallel_knots})")
+        if self_parallel_degree != other_parallel_degree:
+            raise ValueError(f"Degree parallel to the edge of the input surface ({self_parallel_degree}) does "
+                             f"not match the degree parallel to the edge of the other surface "
+                             f"({other_parallel_degree})")
+        for row_index in range(self.get_parallel_control_point_length(surface_edge)):
+            self.set_point(other.get_point(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
+
+    def enforce_c0(self, other: "BSplineSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        """
+        For zeroth-degree continuity, there is no difference between geometric (:math:`G^0`) and parametric
+        (:math:`C^0`) continuity. Because this method is simply a convenience method that calls
+        :obj:`~aerocaps.geom.surfaces.BSplineSurface.enforce_g0`, see the documentation for that method for more
+        detailed documentation.
+
+        Parameters
+        ----------
+        other: BSplineSurface
+            Another B-spline surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0(other, surface_edge, other_surface_edge)
+
+    def enforce_g0g1(self, other: "BSplineSurface", f: float,
+                     surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` continuity, then tangent (:math:`G^1`) continuity is enforced according to
+        the following equation:
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,1} = \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \left[\mathcal{P}^{a,\mathcal{E}_a}_{k,0} - \mathcal{P}^{a,\mathcal{E}_a}_{k,1} \right] \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.BSplineSurface.enforce_g0`
+                Geometric point continuity enforcement (:math:`G^0`)
+            :obj:`~aerocaps.geom.surfaces.BSplineSurface.enforce_c0c1`
+                Parametric continuity equivalent (:math:`C^1`)
+
+        Parameters
+        ----------
+        other: BSplineSurface
+            Another B-spline surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0(other, surface_edge, other_surface_edge)
+        n_ratio = other.get_perpendicular_degree(other_surface_edge) / self.get_perpendicular_degree(surface_edge)
+        for row_index in range(self.get_parallel_degree(surface_edge) + 1):
+            P_i0_b = self.get_point(row_index, 0, surface_edge)
+            P_im_a = other.get_point(row_index, 0, other_surface_edge)
+            P_im1_a = other.get_point(row_index, 1, other_surface_edge)
+
+            P_i1_b = P_i0_b + f * n_ratio * (P_im_a - P_im1_a)
+            self.set_point(P_i1_b, row_index, 1, surface_edge)
+
+    def enforce_c0c1(self, other: "BSplineSurface",
+                     surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.BSplineSurface.enforce_g0g1` with ``f=1.0``. See that
+        method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: BSplineSurface
+            Another B-spline surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
+
+    def enforce_g0g1g2(self, other: "BSplineSurface", f: float,
+                       surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` and :math:`G^1` continuity, then curvature (:math:`G^2`) continuity is enforced
+        according to the following equation:
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,2} = 2 \mathcal{P}^{b,\mathcal{E}_b}_{k,1} - \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \left[ \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{P}^{a,\mathcal{E}_a}_{k,1} + \mathcal{P}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+         :obj:`~aerocaps.geom.surfaces.BSplineSurface.enforce_g0`
+             Geometric point continuity enforcement (:math:`G^0`)
+         :obj:`~aerocaps.geom.surfaces.BSplineSurface.enforce_g0g1`
+             Geometric tangent continuity enforcement (:math:`G^1`)
+         :obj:`~aerocaps.geom.surfaces.BSplineSurface.enforce_c0c1c2`
+             Parametric continuity equivalent (:math:`C^2`)
+
+        Parameters
+        ----------
+        other: BSplineSurface
+            Another B-spline surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
+        p_perp_a = other.get_perpendicular_degree(other_surface_edge)
+        p_perp_b = self.get_perpendicular_degree(surface_edge)
+        n_ratio = (p_perp_a ** 2 - p_perp_a) / (p_perp_b ** 2 - p_perp_b)
+        for row_index in range(self.get_parallel_degree(surface_edge) + 1):
+            P_i0_b = self.get_point(row_index, 0, surface_edge)
+            P_i1_b = self.get_point(row_index, 1, surface_edge)
+            P_im_a = other.get_point(row_index, 0, other_surface_edge)
+            P_im1_a = other.get_point(row_index, 1, other_surface_edge)
+            P_im2_a = other.get_point(row_index, 2, other_surface_edge)
+
+            P_i2_b = (2.0 * P_i1_b - P_i0_b) + f ** 2 * n_ratio * (P_im_a - 2.0 * P_im1_a + P_im2_a)
+            self.set_point(P_i2_b, row_index, 2, surface_edge)
+
+    def enforce_c0c1c2(self, other: "BSplineSurface",
+                       surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.BSplineSurface.enforce_g0g1g2` with ``f=1.0``.
+        See that method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: BSplineSurface
+            Another B-spline surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
+
+    def dSdu(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_dsdu(P, self.knots_u, self.knots_v, u, v))
+
+    def dSdu_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_dsdu_grid(P, self.knots_u, self.knots_v, Nu, Nv))
+
+    def dSdu_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_dsdu_uvvecs(P, self.knots_u, self.knots_v, u, v))
+
+    def dSdv(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the first derivative with respect to :math:`v` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_dsdv(P, self.knots_u, self.knots_v, u, v))
+
+    def dSdv_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_dsdv_grid(P, self.knots_u, self.knots_v, Nu, Nv))
+
+    def dSdv_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_dsdv_uvvecs(P, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdu2(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_d2sdu2(P, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdu2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_d2sdu2_grid(P, self.knots_u, self.knots_v, Nu, Nv))
+
+    def d2Sdu2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_d2sdu2_uvvecs(P, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdv2(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the second derivative with respect to :math:`v` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_d2sdv2(P, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdv2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_d2sdv2_grid(P, self.knots_u, self.knots_v, Nu, Nv))
+
+    def d2Sdv2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bspline_surf_d2sdv2_uvvecs(P, self.knots_u, self.knots_v, u, v))
+
+    def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
+        r"""
+        Evaluates the surface at ``n_points`` parameter locations along a given edge.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the edge curve. Default: 10
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
+        if edge == SurfaceEdge.v1:
+            return np.array(bspline_surf_eval_iso_v(P, self.knots_u, self.knots_v, n_points, 1.0))
+        elif edge == SurfaceEdge.v0:
+            return np.array(bspline_surf_eval_iso_v(P, self.knots_u, self.knots_v, n_points, 0.0))
+        elif edge == SurfaceEdge.u1:
+            return np.array(bspline_surf_eval_iso_u(P, self.knots_u, self.knots_v, 1.0, n_points))
+        elif edge == SurfaceEdge.u0:
+            return np.array(bspline_surf_eval_iso_u(P, self.knots_u, self.knots_v, 0.0, n_points))
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular derivative along a surface edge at ``n_points`` parameter locations.
+        The derivative represents either :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}` or
+        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
+        if edge == SurfaceEdge.v1:
+            return np.array(bspline_surf_dsdv_iso_v(
+                P, self.knots_u, self.knots_v, n_points, 1.0)) if perp else np.array(
+                bspline_surf_dsdu_iso_v(P, self.knots_u, self.knots_v, n_points, 1.0))
+        elif edge == SurfaceEdge.v0:
+            return np.array(bspline_surf_dsdv_iso_v(
+                P, self.knots_u, self.knots_v, n_points, 0.0)) if perp else np.array(
+                bspline_surf_dsdu_iso_v(P, self.knots_u, self.knots_v, n_points, 0.0))
+        elif edge == SurfaceEdge.u1:
+            return np.array(bspline_surf_dsdu_iso_u(
+                P, self.knots_u, self.knots_v, 1.0, n_points)) if perp else np.array(
+                bspline_surf_dsdv_iso_u(P, self.knots_u, self.knots_v, 1.0, n_points))
+        elif edge == SurfaceEdge.u0:
+            return np.array(bspline_surf_dsdu_iso_u(
+                P, self.knots_u, self.knots_v, 0.0, n_points)) if perp else np.array(
+                bspline_surf_dsdv_iso_u(P, self.knots_u, self.knots_v, 0.0, n_points))
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular second derivative along a surface edge at ``n_points`` parameter
+        locations. The derivative represents either :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}` or
+        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the second derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the second derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
+        if edge == SurfaceEdge.v1:
+            return np.array(bspline_surf_d2sdv2_iso_v(
+                P, self.knots_u, self.knots_v, n_points, 1.0)) if perp else np.array(
+                bspline_surf_d2sdu2_iso_v(P, self.knots_u, self.knots_v, n_points, 1.0))
+        elif edge == SurfaceEdge.v0:
+            return np.array(bspline_surf_d2sdv2_iso_v(
+                P, self.knots_u, self.knots_v, n_points, 0.0)) if perp else np.array(
+                bspline_surf_d2sdu2_iso_v(P, self.knots_u, self.knots_v, n_points, 0.0))
+        elif edge == SurfaceEdge.u1:
+            return np.array(bspline_surf_d2sdu2_iso_u(
+                P, self.knots_u, self.knots_v, 1.0, n_points)) if perp else np.array(
+                bspline_surf_d2sdv2_iso_u(P, self.knots_u, self.knots_v, 1.0, n_points))
+        elif edge == SurfaceEdge.u0:
+            return np.array(bspline_surf_d2sdu2_iso_u(
+                P, self.knots_u, self.knots_v, 0.0, n_points)) if perp else np.array(
+                bspline_surf_d2sdv2_iso_u(P, self.knots_u, self.knots_v, 0.0, n_points))
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
+        """
+        Generates a list of :obj:`~aerocaps.geom.point.Point3D` and :obj:`~aerocaps.geom.curves.Line3D` objects
+        representing the NURBS surface's control points and connections between them
+
+        Returns
+        -------
+        typing.List[Point3D], typing.List[Line3D]
+            Control points and lines between adjacent control points in flattened lists
+        """
+        control_points = self.get_control_point_array()
+        points = []
+        lines = []
+
+        for i in range(self.n_points_u):
+            for j in range(self.n_points_v):
+                points.append(Point3D.from_array(control_points[i, j, :]))
+
+        for i in range(self.n_points_u - 1):
+            for j in range(self.n_points_v - 1):
+                point_obj_1 = Point3D.from_array(control_points[i, j, :])
+                point_obj_2 = Point3D.from_array(control_points[i + 1, j, :])
+                point_obj_3 = Point3D.from_array(control_points[i, j + 1, :])
+
+                line_1 = Line3D(p0=point_obj_1, p1=point_obj_2)
+                line_2 = Line3D(p0=point_obj_1, p1=point_obj_3)
+                lines.extend([line_1, line_2])
+
+                if i < self.n_points_u - 2 and j < self.n_points_v - 2:
+                    continue
+
+                point_obj_4 = Point3D.from_array(control_points[i + 1, j + 1, :])
+                line_3 = Line3D(p0=point_obj_3, p1=point_obj_4)
+                line_4 = Line3D(p0=point_obj_2, p1=point_obj_4)
+                lines.extend([line_3, line_4])
+
+        return points, lines
+
+    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs):
+        """
+        Plots the B-spline surface using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        Nu: int
+            Number of points to evaluate in the :math:`u`-parametric direction. Default: ``50``
+        Nv: int
+            Number of points to evaluate in the :math:`v`-parametric direction. Default: ``50``
+        mesh_kwargs:
+            Keyword arguments to pass to :obj:`pyvista.Plotter.add_mesh`
+
+        Returns
+        -------
+        pyvista.core.pointset.StructuredGrid
+            The evaluated B-spline surface
+        """
+        XYZ = self.evaluate_grid(Nu, Nv)
+        grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
+        plot.add_mesh(grid, **mesh_kwargs)
+        return grid
+
+    def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+        """
+        Plots the network of lines connecting the B-spline surface control points using the
+        `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        line_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+        """
+        _, line_objs = self.generate_control_point_net()
+        line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
+        line_arr = line_arr.reshape((len(line_objs) * 2, 3))
+        plot.add_lines(line_arr, **line_kwargs)
+
+    def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+        """
+        Plots the B-spline surface control points using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        point_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+        """
+        point_objs, _ = self.generate_control_point_net()
+        point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
+        plot.add_points(point_arr, **point_kwargs)
+
+
+class NURBSSurface(Surface):
+    """
+    NURBS surface class
+    """
+    def __init__(self,
+                 points: typing.List[typing.List[Point3D]] or np.ndarray,
+                 knots_u: np.ndarray,
+                 knots_v: np.ndarray,
+                 weights: np.ndarray,
+                 ):
+        if isinstance(points, np.ndarray):
+            points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
+        self.points = points
+        assert knots_u.ndim == 1
+        assert knots_v.ndim == 1
+        assert weights.ndim == 2
+        assert len(points) == weights.shape[0]
+        assert len(points[0]) == weights.shape[1]
+
+        # Negative weight check
+        for weight_row in weights:
+            for weight in weight_row:
+                if weight < 0:
+                    raise NegativeWeightError("All weights must be non-negative")
+
+        self.knots_u = knots_u
+        self.knots_v = knots_v
+        self.weights = weights
+
+    @property
+    def n_points_u(self) -> int:
+        """Number of control points in the :math:`u`-parametric direction"""
+        return len(self.points)
+
+    @property
+    def n_points_v(self) -> int:
+        """Number of control points in the :math:`v`-parametric direction"""
+        return len(self.points[0])
+
+    @property
+    def degree_u(self) -> int:
+        """Surface degree in the :math:`u`-parametric direction"""
+        return len(self.knots_u) - self.n_points_u - 1
+
+    @property
+    def degree_v(self) -> int:
+        """Surface degree in the :math:`v`-parametric direction"""
+        return len(self.knots_v) - self.n_points_v - 1
+
+    @property
+    def n(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.NURBSSurface.degree_u`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`u`-parametric direction
+        """
+        return self.degree_u
+
+    @property
+    def m(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.NURBSSurface.degree_v`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`v`-parametric direction
+        """
+        return self.degree_v
+
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        """
+        Exports the NURBS surface to an IGES entity
+        """
+        return aerocaps.iges.surfaces.RationalBSplineSurfaceIGES(
+            control_points=self.get_control_point_array(),
+            knots_u=self.knots_u,
+            knots_v=self.knots_v,
+            weights=self.weights,
+            degree_u=self.degree_u,
+            degree_v=self.degree_v
+        )
+
+    def get_control_point_array(self) -> np.ndarray:
+        r"""
+        Gets the control points in float array form.
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
+
+    def get_homogeneous_control_points(self) -> np.ndarray:
+        r"""
+        Gets the array of control points in homogeneous coordinates, :math:`\mathbf{P}_{i,j} \cdot w_{i,j}`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 4`.
+            The four elements of the last array dimension are, in order,
+            the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
+            control point.
+        """
+        return np.dstack((
+            self.get_control_point_array() * np.repeat(self.weights[:, :, np.newaxis], 3, axis=2),
+            self.weights
+        ))
+
+    @classmethod
+    def from_bezier_revolve(cls, bezier: Bezier3D, axis: Line3D,
+                            start_angle: Angle, end_angle: Angle) -> "NURBSSurface":
+        """
+        Creates a NURBS surface from the revolution of a Bézier curve about an axis.
+
+        Parameters
+        ----------
+        bezier: Bezier3D
+            Bézier curve to revolve
+        axis: Line3D
+            Axis of revolution
+        start_angle: Angle
+            Starting angle for the revolve
+        end_angle: Angle
+            Ending angle for the revolve
+
+        Returns
+        -------
+        NURBSSurface
+            Surface of revolution
+        """
         def _determine_angle_distribution() -> typing.List[Angle]:
-            angle_diff = end_angle.rad - start_angle.rad
+            angle_diff = abs(end_angle.rad - start_angle.rad)
 
             if angle_diff == 0.0:
                 raise InvalidGeometryError("Starting and ending angles cannot be the same for a "
@@ -2036,97 +4351,381 @@ class NURBSSurface(Surface):
                 knots_v = np.insert(knots_v, 3 + idx, new_knot)
 
         knots_u = np.array([0.0 for _ in bezier.control_points] + [1.0 for _ in bezier.control_points])
-        degree_v = 2
-        degree_u = len(bezier.control_points) - 1
 
-        return cls(control_points, knots_u, knots_v, weights, degree_u, degree_v)
+        return cls(control_points, knots_u, knots_v, weights)
 
-    @staticmethod
-    def _get_possible_spans(knot_vector) -> (np.ndarray, np.ndarray):
-        possible_span_indices = np.array([], dtype=int)
-        possible_spans = []
-        for knot_idx, (knot_1, knot_2) in enumerate(zip(knot_vector[:-1], knot_vector[1:])):
-            if knot_1 == knot_2:
-                continue
-            possible_span_indices = np.append(possible_span_indices, knot_idx)
-            possible_spans.append([knot_1, knot_2])
-        return np.array(possible_spans), possible_span_indices
+    def evaluate(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the surface at a given :math:`(u,v)` parameter pair.
 
-    def _cox_de_boor(self, t: float, i: int, p: int, knot_vector: np.ndarray,
-                     possible_spans_u_or_v: np.ndarray, possible_span_indices_u_or_v: np.ndarray) -> float:
-        if p == 0:
-            return 1.0 if i in possible_span_indices_u_or_v and self._find_span(t, possible_spans_u_or_v,
-                                                                                possible_span_indices_u_or_v) == i else 0.0
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        numpy.ndarray
+            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_eval(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def evaluate_point3d(self, u: float, v: float) -> Point3D:
+        r"""
+        Evaluates the NURBS surface at a single :math:`(u,v)` parameter pair and returns a point object.
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        Point3D
+            Point object corresponding to the :math:`(u,v)` pair
+        """
+        return Point3D.from_array(self.evaluate(u, v))
+
+    def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the NURBS surface on a uniform :math:`N_u \times N_v` grid of parameter values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of uniformly spaced parameter values in the :math:`u`-direction
+        Nv: int
+            Number of uniformly spaced parameter values in the :math:`v`-direction
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_eval_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
+
+    def get_parallel_control_point_length(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the number of control points of the curve corresponding to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the number of control points is computed
+
+        Returns
+        -------
+        int
+            Number of control points parallel to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.n_points_u
+        return self.n_points_v
+
+    def get_perpendicular_control_point_length(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the number of control points in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the number of perpendicular control points is computed
+
+        Returns
+        -------
+        int
+            Number of control points perpendicular to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.n_points_v
+        return self.n_points_u
+
+    def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the degree of the curve corresponding to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree parallel to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.degree_u
+        return self.degree_v
+
+    def get_perpendicular_degree(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the degree of the curve in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular degree is evaluated
+
+        Returns
+        -------
+        int
+            Degree perpendicular to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.degree_v
+        return self.degree_u
+
+    def get_parallel_knots(self, surface_edge: SurfaceEdge) -> np.ndarray:
+        r"""
+        Gets the knots in the parametric direction parallel to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel knots are returned
+
+        Returns
+        -------
+        numpy.ndarray
+            Knots parallel to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.knots_u
+        return self.knots_v
+
+    def get_perpendicular_knots(self, surface_edge: SurfaceEdge) -> np.ndarray:
+        r"""
+        Gets the knots in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular knots are returned
+
+        Returns
+        -------
+        numpy.ndarray
+            Knots perpendicular to the edge
+        """
+        if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
+            return self.knots_v
+        return self.knots_u
+
+    def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> Point3D:
+        r"""
+        Gets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` NURBS surface,
+        the following code
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.v0)
+
+        returns the point :math:`\mathbf{P}_{2,1}` and
+
+        .. code-block:: python
+
+            p = surf.get_point(2, 1, ac.SurfaceEdge.u1)
+
+        returns the point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` if there are no internal knot vectors.
+        If the NURBS surface has internal knot vectors, the actual :math:`i`-index of the point may be different,
+        but the second-to-last point in the third row of control points will still be returned.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.set_point`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+
+        Returns
+        -------
+        Point3D
+            Point used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
+        if surface_edge == SurfaceEdge.v1:
+            return self.points[row_index][-(continuity_index + 1)]
+        elif surface_edge == SurfaceEdge.v0:
+            return self.points[row_index][continuity_index]
+        elif surface_edge == SurfaceEdge.u1:
+            return self.points[-(continuity_index + 1)][row_index]
+        elif surface_edge == SurfaceEdge.u0:
+            return self.points[continuity_index][row_index]
         else:
-            with (np.errstate(divide="ignore", invalid="ignore")):
-                f = (t - knot_vector[i]) / (knot_vector[i + p] - knot_vector[i])
-                g = (knot_vector[i + p + 1] - t) / (knot_vector[i + p + 1] - knot_vector[i + 1])
-                if np.isinf(f) or np.isnan(f):
-                    f = 0.0
-                if np.isinf(g) or np.isnan(g):
-                    g = 0.0
-                if f == 0.0 and g == 0.0:
-                    return 0.0
-                elif f != 0.0 and g == 0.0:
-                    return f * self._cox_de_boor(t, i, p - 1, knot_vector,
-                                                 possible_spans_u_or_v, possible_span_indices_u_or_v)
-                elif f == 0.0 and g != 0.0:
-                    return g * self._cox_de_boor(t, i + 1, p - 1, knot_vector,
-                                                 possible_spans_u_or_v, possible_span_indices_u_or_v)
-                else:
-                    return f * self._cox_de_boor(t, i, p - 1, knot_vector,
-                                                 possible_spans_u_or_v, possible_span_indices_u_or_v) + \
-                        g * self._cox_de_boor(t, i + 1, p - 1, knot_vector,
-                                              possible_spans_u_or_v, possible_span_indices_u_or_v)
+            raise ValueError("Invalid surface_edge value")
 
-    def _basis_functions(self, t: float, p: int, knot_vector: np.ndarray, n_control_points_u_or_v: int,
-                         possible_spans_u_or_v: np.ndarray, possible_span_indices_u_or_v: np.ndarray):
+    def set_point(self, point: Point3D, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the point corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` NURBS surface,
+        the following code
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.set_point(p, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of point :math:`\mathbf{P}_{2,1}` to :math:`[3,4,5]^T` and
+
+        .. code-block:: python
+
+            p = ac.Point3D.from_array(np.array([3.0, 4.0, 5.0]))
+            surf.get_point(p, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of point :math:`\mathbf{P}_{6-1,2} = \mathbf{P}_{5,2}` to :math:`[3,4,5]^T` if there are no
+        internal knot vectors.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.get_point`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        point: Point3D
+            Point object to apply at the specified indices
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
         """
-        Compute the non-zero basis functions at parameter t
+        if surface_edge == SurfaceEdge.v1:
+            self.points[row_index][-(continuity_index + 1)] = point
+        elif surface_edge == SurfaceEdge.v0:
+            self.points[row_index][continuity_index] = point
+        elif surface_edge == SurfaceEdge.u1:
+            self.points[-(continuity_index + 1)][row_index] = point
+        elif surface_edge == SurfaceEdge.u0:
+            self.points[continuity_index][row_index] = point
+        else:
+            raise ValueError("Invalid surface_edge value")
+
+    def get_weight(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Gets the weight corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5` NURBS surface,
+        the following code
+
+        .. code-block:: python
+
+            w = surf.get_weight(2, 1, ac.SurfaceEdge.v0)
+
+        returns the weight :math:`w_{2,1}` and
+
+        .. code-block:: python
+
+            w = surf.get_weight(2, 1, ac.SurfaceEdge.u1)
+
+        returns the weight :math:`w_{6-1,2} = w_{5,2}`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.set_weight`
+                Setter equivalent of this method
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge weights
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the weight
+
+        Returns
+        -------
+        float
+            Weight used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
         """
-        return np.array(
-            [self._cox_de_boor(t, i, p, knot_vector, possible_spans_u_or_v, possible_span_indices_u_or_v) for i in
-             range(n_control_points_u_or_v)])
+        if surface_edge == SurfaceEdge.v1:
+            return self.weights[row_index][-(continuity_index + 1)]
+        elif surface_edge == SurfaceEdge.v0:
+            return self.weights[row_index][continuity_index]
+        elif surface_edge == SurfaceEdge.u1:
+            return self.weights[-(continuity_index + 1)][row_index]
+        elif surface_edge == SurfaceEdge.u0:
+            return self.weights[continuity_index][row_index]
+        else:
+            raise ValueError("Invalid surface_edge value")
 
-    @staticmethod
-    def _find_span(t: float, possible_spans_u_or_v: np.ndarray, possible_span_indices_u_or_v: np.ndarray):
+    def set_weight(self, weight: float, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
+        r"""
+        Sets the weight corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied. For example, for a :math:`6 \times 5`
+        NURBS surface, the following code
+
+        .. code-block:: python
+
+            surf.set_weight(0.9, 2, 1, ac.SurfaceEdge.v0)
+
+        sets the value of weight :math:`w_{2,1}` to :math:`0.9` and
+
+        .. code-block:: python
+
+            surf.set_weight(1.1, 2, 1, ac.SurfaceEdge.u1)
+
+        sets the value of weight :math:`w_{6-1,2} = w_{5,2}` to :math:`1.1`.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.get_weight`
+                Getter equivalent of this method
+
+        Parameters
+        ----------
+        weight: float
+            Weight to apply at the specified indices
+        row_index: int
+            Index along the surface edge weights
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the weight
         """
-        Find the knot span index
-        """
-        # insertion_point = bisect.bisect_left(self.non_repeated_knots, t)
-        # return self.possible_spans[insertion_point - 1]
-        for knot_span, knot_span_idx in zip(possible_spans_u_or_v, possible_span_indices_u_or_v):
-            if knot_span[0] <= t < knot_span[1]:
-                return knot_span_idx
-        if t == possible_spans_u_or_v[-1][1]:
-            return possible_span_indices_u_or_v[-1]
-
-    def evaluate_ndarray(self, u: float, v: float) -> np.ndarray:
-        Bu = self._basis_functions(u, self.degree_u, self.knots_u, self.Nu,
-                                   self.possible_spans_u, self.possible_span_indices_u)
-        Bv = self._basis_functions(v, self.degree_v, self.knots_v, self.Nv,
-                                   self.possible_spans_v, self.possible_span_indices_v)
-
-        weighted_cps = np.zeros(self.control_points.shape[2])
-        denominator = 0.0
-
-        for i in range(self.Nu):
-            for j in range(self.Nv):
-                weighted_cps += self.control_points[i][j] * Bu[i] * Bv[j] * self.weights[i][j]
-                denominator += Bu[i] * Bv[j] * self.weights[i][j]
-
-        return weighted_cps / denominator
-
-    def evaluate_simple(self, u: float, v: float) -> Point3D:
-        return Point3D.from_array(self.evaluate_ndarray(u, v))
-
-    def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
-        U, V = np.meshgrid(np.linspace(0.0, 1.0, Nu), np.linspace(0.0, 1.0, Nv))
-        return np.array(
-            [[self.evaluate_ndarray(U[i, j], V[i, j]) for j in range(U.shape[1])] for i in range(U.shape[0])])
+        if surface_edge == SurfaceEdge.v1:
+            self.weights[row_index][-(continuity_index + 1)] = weight
+        elif surface_edge == SurfaceEdge.v0:
+            self.weights[row_index][continuity_index] = weight
+        elif surface_edge == SurfaceEdge.u1:
+            self.weights[-(continuity_index + 1)][row_index] = weight
+        elif surface_edge == SurfaceEdge.u0:
+            self.weights[continuity_index][row_index] = weight
+        else:
+            raise ValueError("Invalid surface_edge value")
 
     def extract_edge_curve(self, surface_edge: SurfaceEdge) -> NURBSCurve3D:
-        P = self.control_points
+        """
+        Extracts the control points, weights, and knots from one of the four edges of the NURBS surface and
+        outputs a NURBS curve with these control points and weights
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which to extract the curve
+
+        Returns
+        -------
+        NURBSCurve3D
+            NURBS curve with control points, weights, and knots corresponding to the control points, weights, and knots
+            along the edge of the surface
+        """
+        P = self.get_control_point_array()
         w = self.weights
 
         if surface_edge == SurfaceEdge.u0:
@@ -2200,48 +4799,681 @@ class NURBSSurface(Surface):
 
         return (A - B) / W
 
-    def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
+    def enforce_g0(self, other: "NURBSSurface",
+                   surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Enforces :math:`G^0` continuity along the input ``surface_edge`` by equating the control points
+        and weights along this edge to the corresponding control points and weights along the ``other_surface_edge``
+        of the NURBS surface given by ``other``.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
 
+        .. important::
+
+            The parallel degree of the current surface along ``surface_edge`` must be equal to the parallel degree
+            of the ``other`` surface along ``other_surface_edge``, otherwise an ``AssertionError`` will be raised.
+            Additionally, the knot vector along the ``surface_edge`` of the current surface must be equal
+            to the knot vector along the ``other_surface_edge`` of the other surface.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_c0`
+                Parametric continuity equivalent (:math:`C^0`)
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        # P^b[:, 0] = P^a[:, -1]
+        self_parallel_knots = self.get_parallel_knots(surface_edge)
+        other_parallel_knots = other.get_parallel_knots(other_surface_edge)
+        self_parallel_degree = self.get_parallel_degree(surface_edge)
+        other_parallel_degree = other.get_parallel_degree(other_surface_edge)
+        if len(self_parallel_knots) != len(other_parallel_knots):
+            raise ValueError(f"Length of the knot vector parallel to the edge of the input surface "
+                             f"({len(self_parallel_knots)}) is not equal to the length of the knot vector "
+                             f"parallel to the edge of the other surface ({len(other_parallel_knots)})")
+        if any([k1 != k2 for k1, k2 in zip(self_parallel_knots, other_parallel_knots)]):
+            raise ValueError(f"Knots parallel to the edge of the input surface ({self_parallel_knots}) "
+                             f"are not equal to the knots in the direction parallel to the edge of the other "
+                             f"surface ({other_parallel_knots})")
+        if self_parallel_degree != other_parallel_degree:
+            raise ValueError(f"Degree parallel to the edge of the input surface ({self_parallel_degree}) does "
+                             f"not match the degree parallel to the edge of the other surface "
+                             f"({other_parallel_degree})")
+        for row_index in range(self.get_parallel_control_point_length(surface_edge)):
+            self.set_point(other.get_point(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
+            self.set_weight(other.get_weight(row_index, 0, other_surface_edge), row_index, 0, surface_edge)
+
+    def enforce_c0(self, other: "NURBSSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        """
+        For zeroth-degree continuity, there is no difference between geometric (:math:`G^0`) and parametric
+        (:math:`C^0`) continuity. Because this method is simply a convenience method that calls
+        :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0`, see the documentation for that method for more
+        detailed documentation.
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0(other, surface_edge, other_surface_edge)
+
+    def enforce_g0g1(self, other: "NURBSSurface", f: float,
+                     surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` continuity, then tangent (:math:`G^1`) continuity is enforced according to
+        the following equations:
+
+        .. math::
+
+            \mathcal{W}^{b,\mathcal{E}_b}_{k,1} = \mathcal{W}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \left( \mathcal{W}^{a,\mathcal{E}_a}_{k,0} - \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \right) \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,1} = \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,0}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}} \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f \frac{p_{\perp}^{a,\mathcal{E}_a}}{p_{\perp}^{b,\mathcal{E}_b}} \frac{1}{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}} \left[\mathcal{W}^{a,\mathcal{E}_a}_{k,0} \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - \mathcal{P}^{a,\mathcal{E}_a}_{k,1} \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \right] \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0`
+                Geometric point continuity enforcement (:math:`G^0`)
+            :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_c0c1`
+                Parametric continuity equivalent (:math:`C^1`)
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0(other, surface_edge, other_surface_edge)
+        n_ratio = other.get_perpendicular_degree(other_surface_edge) / self.get_perpendicular_degree(surface_edge)
+        for row_index in range(self.get_parallel_control_point_length(surface_edge)):
+
+            w_i0_b = self.get_weight(row_index, 0, surface_edge)
+            w_im_a = other.get_weight(row_index, 0, other_surface_edge)
+            w_im1_a = other.get_weight(row_index, 1, other_surface_edge)
+
+            w_i1_b = w_i0_b + f * n_ratio * (w_im_a - w_im1_a)
+
+            if w_i1_b < 0:
+                raise NegativeWeightError("G1 enforcement generated a negative weight")
+
+            self.set_weight(w_i1_b, row_index, 1, surface_edge)
+
+            P_i0_b = self.get_point(row_index, 0, surface_edge)
+            P_im_a = other.get_point(row_index, 0, other_surface_edge)
+            P_im1_a = other.get_point(row_index, 1, other_surface_edge)
+
+            P_i1_b = w_i0_b / w_i1_b * P_i0_b + f * n_ratio / w_i1_b * (w_im_a * P_im_a - w_im1_a * P_im1_a)
+            self.set_point(P_i1_b, row_index, 1, surface_edge)
+
+    def enforce_c0c1(self, other: "NURBSSurface",
+                     surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0g1` with ``f=1.0``. See that
+        method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
+
+    def enforce_g0g1g2(self, other: "NURBSSurface", f: float,
+                       surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        First enforces :math:`G^0` and :math:`G^1` continuity, then curvature (:math:`G^2`) continuity is enforced
+        according to the following equations:
+
+        .. math::
+
+            \mathcal{W}^{b,\mathcal{E}_b}_{k,2} = 2 \mathcal{W}^{b,\mathcal{E}_b}_{k,1} - \mathcal{W}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \left[ \mathcal{W}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{W}^{a,\mathcal{E}_a}_{k,1} + \mathcal{W}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        .. math::
+
+            \mathcal{P}^{b,\mathcal{E}_b}_{k,2} = 2 \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,1}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \mathcal{P}^{b,\mathcal{E}_b}_{k,1} - \frac{\mathcal{W}^{b,\mathcal{E}_b}_{k,0}}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \mathcal{P}^{b,\mathcal{E}_b}_{k,0} + f^2 \frac{p_{\perp}^{a,\mathcal{E}_a}(p_{\perp}^{a,\mathcal{E}_a}-1)}{p_{\perp}^{b,\mathcal{E}_b}(p_{\perp}^{b,\mathcal{E}_b}-1)} \frac{1}{\mathcal{W}^{b,\mathcal{E}_b}_{k,2}} \left[ \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \mathcal{P}^{a,\mathcal{E}_a}_{k,0} - 2 \mathcal{W}^{a,\mathcal{E}_a}_{k,1} \mathcal{P}^{a,\mathcal{E}_a}_{k,1} + \mathcal{W}^{a,\mathcal{E}_a}_{k,2} \mathcal{P}^{a,\mathcal{E}_a}_{k,2} \right]  \text{ for }k=0,1,\ldots,p_{\parallel}^{b,\mathcal{E}_b}
+
+        Here, :math:`b` corresponds to the current surface, and :math:`a` corresponds to the ``other`` surface.
+        The control points of the surface from which this method is called are modified in-place, and the control
+        points of ``other`` are left unchanged.
+
+        .. seealso::
+
+         :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0`
+             Geometric point continuity enforcement (:math:`G^0`)
+         :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0g1`
+             Geometric tangent continuity enforcement (:math:`G^1`)
+         :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_c0c1c2`
+             Parametric continuity equivalent (:math:`C^2`)
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        f: float
+            Tangent proportionality factor
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
+        n_ratio = (other.get_perpendicular_degree(other_surface_edge) ** 2 -
+                   other.get_perpendicular_degree(other_surface_edge)) / (
+                          self.get_perpendicular_degree(surface_edge) ** 2 - self.get_perpendicular_degree(
+                      surface_edge))
+        for row_index in range(self.get_parallel_control_point_length(surface_edge)):
+
+            w_i0_b = self.get_weight(row_index, 0, surface_edge)
+            w_i1_b = self.get_weight(row_index, 1, surface_edge)
+            w_im_a = other.get_weight(row_index, 0, other_surface_edge)
+            w_im1_a = other.get_weight(row_index, 1, other_surface_edge)
+            w_im2_a = other.get_weight(row_index, 2, other_surface_edge)
+
+            w_i2_b = 2.0 * w_i1_b - w_i0_b + f ** 2 * n_ratio * (w_im_a - 2.0 * w_im1_a + w_im2_a)
+
+            if w_i2_b < 0:
+                raise NegativeWeightError("G2 enforcement generated a negative weight")
+
+            self.set_weight(w_i2_b, row_index, 2, surface_edge)
+
+            P_i0_b = self.get_point(row_index, 0, surface_edge)
+            P_i1_b = self.get_point(row_index, 1, surface_edge)
+            P_im_a = other.get_point(row_index, 0, other_surface_edge)
+            P_im1_a = other.get_point(row_index, 1, other_surface_edge)
+            P_im2_a = other.get_point(row_index, 2, other_surface_edge)
+
+            P_i2_b = (2.0 * w_i1_b / w_i2_b * P_i1_b - w_i0_b / w_i2_b * P_i0_b) + f ** 2 * n_ratio * (
+                        1 / w_i2_b) * (
+                             w_im_a * P_im_a - 2.0 * w_im1_a * P_im1_a + w_im2_a * P_im2_a)
+            self.set_point(P_i2_b, row_index, 2, surface_edge)
+
+    def enforce_c0c1c2(self, other: "NURBSSurface",
+                       surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
+        r"""
+        Equivalent to calling :obj:`~aerocaps.geom.surfaces.NURBSSurface.enforce_g0g1g2` with ``f=1.0``.
+        See that method for more detailed documentation.
+
+        Parameters
+        ----------
+        other: NURBSSurface
+            Another NURBS surface along which an edge will be used for stitching
+        surface_edge: SurfaceEdge
+            The edge of the current surface to modify
+        other_surface_edge: SurfaceEdge
+            Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
+            of the current surface
+        """
+        self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
+
+    def dSdu(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdu(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def dSdu_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdu_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
+
+    def dSdu_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdu_uvvecs(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def dSdv(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the first derivative with respect to :math:`v` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdv(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def dSdv_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdv_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
+
+    def dSdv_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdv_uvvecs(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdu2(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdu2(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdu2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdu2_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
+
+    def d2Sdu2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdu2_uvvecs(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdv2(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the second derivative with respect to :math:`v` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdv2(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdv2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdv2_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
+
+    def d2Sdv2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdv2_uvvecs(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
+        r"""
+        Evaluates the surface at ``n_points`` parameter locations along a given edge.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the edge curve. Default: 10
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
+        if edge == SurfaceEdge.v1:
+            return np.array(nurbs_surf_eval_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 1.0))
+        elif edge == SurfaceEdge.v0:
+            return np.array(nurbs_surf_eval_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 0.0))
+        elif edge == SurfaceEdge.u1:
+            return np.array(nurbs_surf_eval_iso_u(P, self.weights, self.knots_u, self.knots_v, 1.0, n_points))
+        elif edge == SurfaceEdge.u0:
+            return np.array(nurbs_surf_eval_iso_u(P, self.weights, self.knots_u, self.knots_v, 0.0, n_points))
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular derivative along a surface edge at ``n_points`` parameter locations.
+        The derivative represents either :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}` or
+        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
+        if edge == SurfaceEdge.v1:
+            return np.array(nurbs_surf_dsdv_iso_v(
+                P, self.weights, self.knots_u, self.knots_v, n_points, 1.0)) if perp else np.array(
+                nurbs_surf_dsdu_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 1.0))
+        elif edge == SurfaceEdge.v0:
+            return np.array(nurbs_surf_dsdv_iso_v(
+                P, self.weights, self.knots_u, self.knots_v, n_points, 0.0)) if perp else np.array(
+                nurbs_surf_dsdu_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 0.0))
+        elif edge == SurfaceEdge.u1:
+            return np.array(nurbs_surf_dsdu_iso_u(
+                P, self.weights, self.knots_u, self.knots_v, 1.0, n_points)) if perp else np.array(
+                nurbs_surf_dsdv_iso_u(P, self.weights, self.knots_u, self.knots_v, 1.0, n_points))
+        elif edge == SurfaceEdge.u0:
+            return np.array(nurbs_surf_dsdu_iso_u(
+                P, self.weights, self.knots_u, self.knots_v, 0.0, n_points)) if perp else np.array(
+                nurbs_surf_dsdv_iso_u(P, self.weights, self.knots_u, self.knots_v, 0.0, n_points))
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular second derivative along a surface edge at ``n_points`` parameter
+        locations. The derivative represents either :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}` or
+        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the second derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the second derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
+        if edge == SurfaceEdge.v1:
+            return np.array(nurbs_surf_d2sdv2_iso_v(
+                P, self.weights, self.knots_u, self.knots_v, n_points, 1.0)) if perp else np.array(
+                nurbs_surf_d2sdu2_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 1.0))
+        elif edge == SurfaceEdge.v0:
+            return np.array(nurbs_surf_d2sdv2_iso_v(
+                P, self.weights, self.knots_u, self.knots_v, n_points, 0.0)) if perp else np.array(
+                nurbs_surf_d2sdu2_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 0.0))
+        elif edge == SurfaceEdge.u1:
+            return np.array(nurbs_surf_d2sdu2_iso_u(
+                P, self.weights, self.knots_u, self.knots_v, 1.0, n_points)) if perp else np.array(
+                nurbs_surf_d2sdv2_iso_u(P, self.weights, self.knots_u, self.knots_v, 1.0, n_points))
+        elif edge == SurfaceEdge.u0:
+            return np.array(nurbs_surf_d2sdu2_iso_u(
+                P, self.weights, self.knots_u, self.knots_v, 0.0, n_points)) if perp else np.array(
+                nurbs_surf_d2sdv2_iso_u(P, self.weights, self.knots_u, self.knots_v, 0.0, n_points))
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
+        """
+        Generates a list of :obj:`~aerocaps.geom.point.Point3D` and :obj:`~aerocaps.geom.curves.Line3D` objects
+        representing the NURBS surface's control points and connections between them
+
+        Returns
+        -------
+        typing.List[Point3D], typing.List[Line3D]
+            Control points and lines between adjacent control points in flattened lists
+        """
+        control_points = self.get_control_point_array()
         points = []
         lines = []
 
-        for i in range(self.Nu):
-            for j in range(self.Nv):
-                points.append(Point3D.from_array(self.control_points[i, j, :]))
+        for i in range(self.n_points_u):
+            for j in range(self.n_points_v):
+                points.append(Point3D.from_array(control_points[i, j, :]))
 
-        for i in range(self.Nu - 1):
-            for j in range(self.Nv - 1):
-                point_obj_1 = Point3D.from_array(self.control_points[i, j, :])
-                point_obj_2 = Point3D.from_array(self.control_points[i + 1, j, :])
-                point_obj_3 = Point3D.from_array(self.control_points[i, j + 1, :])
+        for i in range(self.n_points_u - 1):
+            for j in range(self.n_points_v - 1):
+                point_obj_1 = Point3D.from_array(control_points[i, j, :])
+                point_obj_2 = Point3D.from_array(control_points[i + 1, j, :])
+                point_obj_3 = Point3D.from_array(control_points[i, j + 1, :])
 
                 line_1 = Line3D(p0=point_obj_1, p1=point_obj_2)
                 line_2 = Line3D(p0=point_obj_1, p1=point_obj_3)
                 lines.extend([line_1, line_2])
 
-                if i < self.Nu - 2 and j < self.Nv - 2:
+                if i < self.n_points_u - 2 and j < self.n_points_v - 2:
                     continue
 
-                point_obj_4 = Point3D.from_array(self.control_points[i + 1, j + 1, :])
+                point_obj_4 = Point3D.from_array(control_points[i + 1, j + 1, :])
                 line_3 = Line3D(p0=point_obj_3, p1=point_obj_4)
                 line_4 = Line3D(p0=point_obj_2, p1=point_obj_4)
                 lines.extend([line_3, line_4])
 
         return points, lines
 
-    def plot_surface(self, plot: pv.Plotter, **mesh_kwargs):
-        XYZ = self.evaluate(50, 50)
+    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs):
+        """
+        Plots the NURBS surface using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        Nu: int
+            Number of points to evaluate in the :math:`u`-parametric direction. Default: ``50``
+        Nv: int
+            Number of points to evaluate in the :math:`v`-parametric direction. Default: ``50``
+        mesh_kwargs:
+            Keyword arguments to pass to :obj:`pyvista.Plotter.add_mesh`
+
+        Returns
+        -------
+        pyvista.core.pointset.StructuredGrid
+            The evaluated NURBS surface
+        """
+        XYZ = self.evaluate_grid(Nu, Nv)
         grid = pv.StructuredGrid(XYZ[:, :, 0], XYZ[:, :, 1], XYZ[:, :, 2])
         plot.add_mesh(grid, **mesh_kwargs)
         return grid
 
     def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+        """
+        Plots the network of lines connecting the NURBS surface control points using the
+        `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        line_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+        """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
         plot.add_lines(line_arr, **line_kwargs)
 
     def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+        """
+        Plots the NURBS surface control points using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        point_kwargs:
+            Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+        """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
         plot.add_points(point_arr, **point_kwargs)
@@ -2269,179 +5501,3 @@ class TrimmedSurface(Surface):
             outer_boundary_iges,
             inner_boundaries_iges
         )
-
-
-class PlanarFillSurfaceCreator:
-    def __init__(self, closed_curve_loop_list: typing.List[
-        Bezier3D or RationalBezierCurve3D or NURBSCurve3D or BSpline3D or Line3D]):
-        """
-        Generator class for fill surfaces comprised of point-curve polar-like patches.
-
-        .. warning::
-            The curves must be co-planar to achieve the expected result
-        """
-        self.closed_curve_loop_list = closed_curve_loop_list
-        self.validate()
-
-    def validate(self):
-        endpoints = {}
-        for curve in self.closed_curve_loop_list:
-            endpoint_1 = curve.control_points[0]
-            endpoint_2 = curve.control_points[-1]
-            for endpoint_to_test in [endpoint_1, endpoint_2]:
-                for endpoint in endpoints:
-                    if endpoint.almost_equals(endpoint_to_test):
-                        endpoints[endpoint] = True
-                        break
-                else:
-                    endpoints[endpoint_to_test] = False
-
-        for v in endpoints.values():
-            if v:
-                continue
-            raise ValueError("Assigned curve loop is not closed")
-
-    def get_ordered_curve_list(self) -> (
-            typing.List[Bezier3D or NURBSCurve3D or BSpline3D or RationalBezierCurve3D or Line3D],
-            typing.List[Point3D]):
-        # Copy a list of the curves
-        curve_stack = deepcopy(self.closed_curve_loop_list)
-        ordered_curve_list = [deepcopy(curve_stack[0])]
-
-        # Get points for first curve. This will set the starting point and the direction of the curve loop.
-        point_loop = curve_stack.pop(0).control_points
-
-        while curve_stack:  # Loop until the curve stack is empty
-            for curve_idx, curve in enumerate(curve_stack):
-                if point_loop[-1].almost_equals(curve.control_points[0]):
-                    ordered_curve_list.append(curve)
-                    point_loop.extend(curve_stack.pop(curve_idx).control_points[1:])
-                    break  # Go to the next curve in the stack
-                elif point_loop[-1].almost_equals(curve.control_points[-1]):
-                    ordered_curve_list.append(curve.reverse())
-                    point_loop.extend(curve_stack.pop(curve_idx).control_points[:-1][::-1])
-                    break  # Go to the next curve in the stack
-
-        return ordered_curve_list, point_loop
-
-    @staticmethod
-    def get_envelope(ordered_curve_list: typing.List[
-        Bezier3D or BSpline3D or NURBSCurve3D or RationalBezierCurve3D or Line3D],
-                     control_point_loop: typing.List[Point3D]) -> (list, BezierSurface):
-        loop_array = np.array([p.as_array() for p in control_point_loop])
-        parametric_curves = []
-
-        # Need to convert to 2-D to use shapely. Get the coordinate system of the plane containing the points
-        # using cross products of vectors described by the points
-        v1 = Vector3D(control_point_loop[0], control_point_loop[1])
-        v2 = Vector3D(control_point_loop[0], control_point_loop[2])
-        v3 = v1.cross(v2)
-        v4 = v1.cross(v3)
-
-        # The coordinate system is now fully described by v1, v3, and v4. v1 and v4 are the in-plane components,
-        # while v3 is the out-of-plane component. The origin of this coordinate system is at control_point_loop[0].
-        loop_array_transformed = aerocaps.transform_points_into_coordinate_system(
-            loop_array, [v1, v4, v3], [aerocaps.IHat3D(), aerocaps.JHat3D(), aerocaps.KHat3D()]
-        )
-        # Make sure that all the curves are coplanar
-        if not all([np.isclose(z, loop_array_transformed[0, 2]) for z in loop_array_transformed[1:, 2]]):
-            raise ValueError("Curves are not all coplanar!")
-        loop_array_2d = loop_array_transformed[:, :2]
-        z_plane = loop_array_transformed[0, 2]
-
-        # Create the polygon and find a point representing the center of the polygon while guaranteed to be inside
-        # the polygon
-        polygon = shapely.Polygon(loop_array_2d)
-        envelope_2d = np.array(shapely.envelope(polygon).exterior.coords)
-        envelope_2d[0, 0] -= 3.0
-        envelope_2d[0, 1] -= 3.0
-        envelope_2d[1, 0] += 3.0
-        envelope_2d[1, 1] -= 3.0
-        envelope_2d[2, 0] += 3.0
-        envelope_2d[2, 1] += 3.0
-        envelope_2d[3, 0] -= 3.0
-        envelope_2d[3, 1] += 3.0
-        x_min, x_max = envelope_2d[:, 0].min(), envelope_2d[:, 0].max()
-        y_min, y_max = envelope_2d[:, 1].min(), envelope_2d[:, 1].max()
-        dx, dy = (x_max - x_min), (y_max - y_min)
-
-        # Get parametric curves in the plane defined by the envelope for each curve in the ordered curve list
-        for curve in ordered_curve_list:
-            cps_transformed = aerocaps.transform_points_into_coordinate_system(
-                curve.get_control_point_array(), [v1, v4, v3], [aerocaps.IHat3D(), aerocaps.JHat3D(), aerocaps.KHat3D()]
-            )
-            cps_x = cps_transformed[:, 0]
-            cps_y = cps_transformed[:, 1]
-            u = [(cp_x - x_min) / dx for cp_x in cps_x]
-            v = [(cp_y - y_min) / dy for cp_y in cps_y]
-            uv = np.array([u, v]).T
-            uv0 = np.column_stack((uv, np.zeros(uv.shape[0])))
-            if isinstance(curve, Line3D):
-                parametric_curve = curve.__class__(p0=Point3D.from_array(uv0[0, :]), p1=Point3D.from_array(uv0[1, :]))
-            elif isinstance(curve, Bezier3D):
-                parametric_curve = curve.__class__.generate_from_array(uv0)
-            elif isinstance(curve, BSpline3D):
-                parametric_curve = curve.__class__(uv0, curve.knot_vector, curve.degree)
-            elif isinstance(curve, RationalBezierCurve3D):
-                parametric_curve = curve.__class__.generate_from_array(uv0, curve.weights)
-            elif isinstance(curve, NURBSCurve3D):
-                parametric_curve = curve.__class__(uv0, curve.weights, curve.knot_vector, curve.degree)
-            else:
-                raise ValueError(f"Invalid curve type {type(curve)}")
-            parametric_curves.append(parametric_curve)
-
-        envelope_3d = np.column_stack((envelope_2d, z_plane * np.ones(envelope_2d.shape[0])))
-
-        # Transform the newly created envelope back into the original coordinate system
-        reverse_transformed_envelope_3d = aerocaps.transform_points_into_coordinate_system(
-            envelope_3d, [aerocaps.IHat3D(), aerocaps.JHat3D(), aerocaps.KHat3D()], [v1, v4, v3]
-        )
-
-        # Create a planar rectangular surface from the transformed points
-        pa = Point3D.from_array(reverse_transformed_envelope_3d[0, :])
-        pb = Point3D.from_array(reverse_transformed_envelope_3d[1, :])
-        pc = Point3D.from_array(reverse_transformed_envelope_3d[2, :])
-        pd = Point3D.from_array(reverse_transformed_envelope_3d[3, :])
-        planar_surf = aerocaps.BezierSurface([[pa, pd], [pb, pc]])
-
-        return parametric_curves, planar_surf
-
-    def generate(self) -> (list, list, BezierSurface):
-
-        ordered_curve_list, control_point_loop = self.get_ordered_curve_list()
-        parametric_curves, planar_surf = self.get_envelope(
-            ordered_curve_list, control_point_loop
-        )
-
-        return ordered_curve_list, parametric_curves, planar_surf
-
-    def to_iges(self) -> typing.List[aerocaps.iges.entity.IGESEntity]:
-        entities = []
-        ordered_curve_list, parametric_curves, planar_surf = self.generate()
-
-        # Create the composite curves
-        composite = aerocaps.CompositeCurve3D(ordered_curve_list)
-        composite_para = aerocaps.CompositeCurve3D(parametric_curves)
-
-        # Create the definition for the parametric curve
-        curve_on_parametric_surface = aerocaps.CurveOnParametricSurface(
-            planar_surf,
-            composite_para,
-            composite
-        )
-
-        # Create the trimmed surface object
-        trimmed_surf = aerocaps.TrimmedSurface(planar_surf, curve_on_parametric_surface)
-
-        # Compile the list of entities
-        K1 = len(ordered_curve_list)
-        K2 = K1 + len(parametric_curves)
-        entities = [curve.to_iges() for curve in ordered_curve_list]
-        entities.extend([curve.to_iges() for curve in parametric_curves])
-        entities.append(composite.to_iges(entities[0:K1]))
-        entities.append(composite_para.to_iges(entities[K1:K2]))
-        entities.append(planar_surf.to_iges())
-        entities.append(curve_on_parametric_surface.to_iges(entities[K2 + 2], entities[K2 + 1], entities[K2]))
-        entities.append(trimmed_surf.to_iges(entities[K2 + 2], entities[K2 + 3]))
-
-        return entities

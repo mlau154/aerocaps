@@ -51,6 +51,16 @@ class Vector2D:
     def mag(self) -> Length:
         return Length(m=np.sqrt(np.sum(self.as_array()**2)))
 
+    def __mul__(self, other):
+        if isinstance(other, float) or isinstance(other, int):
+            return Vector2D.from_array(other * self.as_array())
+        raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
+
+    def __rmul__(self, other):
+        if isinstance(other, float) or isinstance(other, int):
+            return Vector2D.from_array(other * self.as_array())
+        raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
+
 
 class Vector3D:
     def __init__(self, p0: Point3D, p1: Point3D):
@@ -90,6 +100,16 @@ class Vector3D:
 
     def mag(self) -> Length:
         return Length(m=np.sqrt(np.sum(self.as_array()**2)))
+
+    def __mul__(self, other):
+        if isinstance(other, float) or isinstance(other, int):
+            return Vector3D.from_array(other * self.as_array())
+        raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
+
+    def __rmul__(self, other):
+        if isinstance(other, float) or isinstance(other, int):
+            return Vector3D.from_array(other * self.as_array())
+        raise NotImplementedError(f"Vector scaling is currently only implemented for int and float data")
 
 
 class IHat2D(Vector2D):

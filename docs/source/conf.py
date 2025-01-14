@@ -34,6 +34,8 @@ intersphinx_mapping = {
     'sphinx': ('https://www.sphinx-doc.org/en/master/', None),
     'matplotlib': ('https://matplotlib.org/stable', None),
     'numpy': ('https://numpy.org/doc/stable/', None),
+    "pyvista": ("https://docs.pyvista.org/", None),
+    "rust_nurbs": ("https://rust-nurbs.readthedocs.io/en/latest/", None),
 }
 
 templates_path = ['_templates']

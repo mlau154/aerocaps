@@ -21,7 +21,15 @@ class Geometry3D:
 
 class Surface(Geometry3D):
     @abstractmethod
-    def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
+    def evaluate(self, u: float, v: float) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def evaluate_point3d(self, u: float, v: float):
+        pass
+
+    @abstractmethod
+    def evaluate_grid(self, Nu: int, Nv: int) -> np.ndarray:
         pass
 
 
