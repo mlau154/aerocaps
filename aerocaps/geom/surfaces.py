@@ -10,7 +10,6 @@ from enum import Enum
 import numpy as np
 import pyvista as pv
 from scipy.optimize import fsolve
-import shapely
 
 import aerocaps.iges.entity
 import aerocaps.iges.curves
@@ -18,14 +17,13 @@ import aerocaps.iges.surfaces
 from rust_nurbs import *
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
 from aerocaps.geom.point import Point3D
-from aerocaps.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
+from aerocaps.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D
 from aerocaps.geom.plane import Plane
 from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis, add_vector_to_point
 from aerocaps.geom.vector import Vector3D
 from aerocaps.units.angle import Angle
 from aerocaps.units.length import Length
 from aerocaps.utils.array import unique_with_tolerance
-from aerocaps.utils.math import bernstein_poly
 
 __all__ = [
     "SurfaceEdge",
@@ -33,7 +31,6 @@ __all__ = [
     "BezierSurface",
     "RationalBezierSurface",
     "NURBSSurface",
-    "PlanarFillSurfaceCreator",
     "TrimmedSurface"
 ]
 
@@ -64,7 +61,7 @@ class SurfaceCorner(Enum):
 
 class BezierSurface(Surface):
     """
-    Bézier surface class. A NURBS surface with no internal knot spans and all weights equal to unity.
+    Bézier surface class. A NURBS surface with no internal knots and all weights equal to unity.
     """
     def __init__(self, points: typing.List[typing.List[Point3D]] or np.ndarray):
         r"""
@@ -193,6 +190,32 @@ class BezierSurface(Surface):
     @classmethod
     def from_curve_extrude(cls, curve: Bezier3D, distance: Length, extrude_axis: Vector3D = None,
                            symmetric: bool = False, reverse: bool = False):
+        """
+        Creates a Bézier surface by extruding a Bézier curve along an axis.
+
+        .. important::
+
+            If the input curve is linear, the ``extrude_axis`` argument must be specified.
+
+        Parameters
+        ----------
+        curve: Bezier3D
+            Curve to extrude. The most common use case is a planar curve, but this is not required.
+        distance: Length
+            Distance along the axis to extrude
+        extrude_axis: Vector3D
+            Optional direct specification of the extrusion axis. If not specified, a vector normal to the plane
+            containing the first, second, and last control points of the curve is used. Default: ``None``
+        symmetric: bool
+            Whether to extrude in both directions. Default: ``False``
+        reverse: bool
+            Whether to flip the extrusion vector. Default: ``False``
+
+        Returns
+        -------
+        BezierSurface
+            Extruded surface
+        """
         # Input validation
         if curve.degree < 2 and extrude_axis is None:
             raise ValueError("For linear Bézier curves (those with only two control points), "
@@ -206,8 +229,8 @@ class BezierSurface(Surface):
             extrude_axis = extrude_axis.get_normalized_vector()
 
         # Get the scaled extrusion vectors
-        extrude_vec_forward = extrude_axis.scale(0.5 if symmetric else 1.0 * distance.m)
-        extrude_vec_backward = extrude_axis.scale(0.5 if symmetric else 1.0 * distance.m)
+        extrude_vec_forward = extrude_axis.scale(distance.m)
+        extrude_vec_backward = extrude_axis.scale(distance.m)
 
         # Get the start and end point lists for the surface
         if symmetric:
@@ -227,8 +250,7 @@ class BezierSurface(Surface):
 
     def dSdu(self, u: float, v: float) -> np.ndarray:
         r"""
-        Evaluates the first derivative of the surface in the :math:`u`-direction,
-        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}`, at a given :math:`(u,v)` parameter pair.
+        Evaluates the first derivative with respect to :math:`u` at a single :math:`(u,v)` pair
 
         Parameters
         ----------
@@ -239,17 +261,55 @@ class BezierSurface(Surface):
 
         Returns
         -------
-        numpy.ndarray
-            1-D array of the form ``array([dSdu_x, dSdu_y, dSdu_z])`` representing the :math:`x`-, :math:`y`-,
-            and :math:`z`-components of :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}`
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
         """
         P = self.get_control_point_array()
         return np.array(bezier_surf_dsdu(P, u, v))
 
-    def dSdv(self, u: float, v: float) -> np.ndarray:
+    def dSdu_grid(self, Nu: int, Nv: int) -> np.ndarray:
         r"""
-        Evaluates the first derivative of the surface in the :math:`v`-direction,
-        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}`, at a given :math:`(u,v)` parameter pair.
+        Evaluates the first derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_dsdu_grid(P, Nu, Nv))
+
+    def dSdu_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_dsdu_uvvecs(P, u, v))
+
+    def dSdv(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the first derivative with respect to :math:`v` at a single :math:`(u,v)` pair
 
         Parameters
         ----------
@@ -260,17 +320,55 @@ class BezierSurface(Surface):
 
         Returns
         -------
-        numpy.ndarray
-            1-D array of the form ``array([dSdv_x, dSdv_y, dSdv_z])`` representing the :math:`x`-, :math:`y`-,
-            and :math:`z`-components of :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}`
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
         """
         P = self.get_control_point_array()
         return np.array(bezier_surf_dsdv(P, u, v))
 
+    def dSdv_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_dsdv_grid(P, Nu, Nv))
+
+    def dSdv_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_dsdv_uvvecs(P, u, v))
+
     def d2Sdu2(self, u: float, v: float) -> np.ndarray:
         r"""
-        Evaluates the second pure derivative of the surface in the :math:`u`-direction,
-        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}`, at a given :math:`(u,v)` parameter pair.
+        Evaluates the second derivative with respect to :math:`u` at a single :math:`(u,v)` pair
 
         Parameters
         ----------
@@ -281,17 +379,55 @@ class BezierSurface(Surface):
 
         Returns
         -------
-        numpy.ndarray
-            1-D array of the form ``array([dS2du2_x, dS2du2_y, dS2du2_z])`` representing the :math:`x`-, :math:`y`-,
-            and :math:`z`-components of :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}`
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
         """
         P = self.get_control_point_array()
         return np.array(bezier_surf_d2sdu2(P, u, v))
 
-    def d2Sdv2(self, u: float, v: float) -> np.ndarray:
+    def d2Sdu2_grid(self, Nu: int, Nv: int) -> np.ndarray:
         r"""
-        Evaluates the second pure derivative of the surface in the :math:`v`-direction,
-        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}`, at a given :math:`(u,v)` parameter pair.
+        Evaluates the second derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_d2sdu2_grid(P, Nu, Nv))
+
+    def d2Sdu2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_d2sdu2_uvvecs(P, u, v))
+
+    def d2Sdv2(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the second derivative with respect to :math:`v` at a single :math:`(u,v)` pair
 
         Parameters
         ----------
@@ -302,12 +438,51 @@ class BezierSurface(Surface):
 
         Returns
         -------
-        numpy.ndarray
-            1-D array of the form ``array([dS2dv2_x, dS2dv2_y, dS2dv2_z])`` representing the :math:`x`-, :math:`y`-,
-            and :math:`z`-components of :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}`
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
         """
         P = self.get_control_point_array()
         return np.array(bezier_surf_d2sdv2(P, u, v))
+
+    def d2Sdv2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_d2sdv2_grid(P, Nu, Nv))
+
+    def d2Sdv2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(bezier_surf_d2sdv2_uvvecs(P, u, v))
 
     def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
         r"""
@@ -565,7 +740,7 @@ class BezierSurface(Surface):
 
     def evaluate_uvvecs(self, u: np.ndarray, v: np.ndarray) -> np.ndarray:
         r"""
-        Evaluates the Bézier surface at arbitrary vectors of :math:`u` and :math:`v`values.
+        Evaluates the Bézier surface at arbitrary vectors of :math:`u` and :math:`v`-values.
 
         Parameters
         ----------
@@ -1332,17 +1507,24 @@ class RationalBezierSurface(Surface):
 
         self.knots_u = knots_u
         self.knots_v = knots_v
-        self.weights = weights
+        self._weights = weights
         self.degree_u = degree_u
         self.degree_v = degree_v
 
     @property
-    def Nu(self):
+    def n_points_u(self) -> int:
+        """Number of points in the :math:`u`-direction"""
         return len(self.points)
 
     @property
-    def Nv(self):
+    def n_points_v(self) -> int:
+        """Number of points in the :math:`v`-direction"""
         return len(self.points[0])
+
+    @property
+    def weights(self) -> np.ndarray:
+        """Weight matrix (all ones for this surface type)"""
+        return self._weights
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.surfaces.RationalBSplineSurfaceIGES(
@@ -1858,238 +2040,258 @@ class RationalBezierSurface(Surface):
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
 
-    @staticmethod
-    def _cast_uv(u: float or np.ndarray, v: float or np.ndarray) -> (float, float) or (np.ndarray, np.ndarray):
-        if not isinstance(u, np.ndarray):
-            u = np.array([u])
-        if not isinstance(v, np.ndarray):
-            v = np.array([v])
+    def dSdu(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` at a single :math:`(u,v)` pair
 
-        #print(f"{u=},{v=}")
-        return u, v
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
 
-    def dSdu_v2(self, u: float, v: float):
-        n, m = self.degree_u, self.degree_v
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
         P = self.get_control_point_array()
-        w = self.weights
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_dsdu(P, self.weights, u, v))
 
-        A_1 = np.zeros(P.shape[2])
-        A_2 = np.zeros(P.shape[2])
-        B_1 = np.zeros(P.shape[2])
-        B_2 = np.zeros(P.shape[2])
+    def dSdu_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
 
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                dbudu = self.degree_u * (
-                            bernstein_poly(self.degree_u - 1, i - 1, u) - bernstein_poly(self.degree_u - 1, i, u))
-                A_1 += bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * w[i, j]
-                A_2 += dbudu * bernstein_poly(m, j, v) * w[i, j] * P[i, j, :]
-                B_1 += bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * w[i, j] * P[i, j, :]
-                B_2 += dbudu * bernstein_poly(m, j, v) * w[i, j]
-        A = A_1 * A_2
-        B = B_1 * B_2
-        return (A - B) / (A_1 ** 2)
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
 
-    def dSdv_v2(self, u: float, v: float):
-        n, m = self.degree_u, self.degree_v
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
         P = self.get_control_point_array()
-        w = self.weights
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_dsdu_grid(P, self.weights, Nu, Nv))
 
-        A_1 = np.zeros(P.shape[2])
-        A_2 = np.zeros(P.shape[2])
-        B_1 = np.zeros(P.shape[2])
-        B_2 = np.zeros(P.shape[2])
+    def dSdu_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
 
-        for i in range(self.degree_u + 1):
-            for j in range(self.degree_v + 1):
-                dbvdv = m * (bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v))
-                A_1 += bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * w[i, j]
-                A_2 += bernstein_poly(n, i, u) * dbvdv * w[i, j] * P[i, j, :]
-                B_1 += bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * w[i, j] * P[i, j, :]
-                B_2 += bernstein_poly(n, i, u) * dbvdv * w[i, j]
-        A = A_1 * A_2
-        B = B_1 * B_2
-        return (A - B) / (A_1 ** 2)
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
 
-    def dSdu(self, u: float or np.ndarray, v: float or np.ndarray):
-        n, m = self.degree_u, self.degree_v
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
         P = self.get_control_point_array()
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
-
-        weight_arr = np.array([[bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * self.weights[i, j]
-                                for j in range(m + 1)] for i in range(n + 1)])
-        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
-
-        point_arr = np.array([[np.array([(bernstein_poly(n, i, u) * bernstein_poly(m, j, v) *
-                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
-                               for j in range(m + 1)] for i in range(n + 1)])
-        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
-
-        point_arr_deriv = np.array([[np.array([((bernstein_poly(n - 1, i - 1, u) - bernstein_poly(n - 1, i, u)) *
-                                                bernstein_poly(m, j, v) * self.weights[i, j])]).T @
-                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
-
-        weight_arr_deriv = np.array([[(bernstein_poly(n - 1, i - 1, u) - bernstein_poly(n - 1, i, u)) *
-                                      bernstein_poly(m, j, v) * self.weights[i, j]
-                                      for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
-
-        A = n * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
-        B = n * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
-        W = np.tile(weight_sum ** 2, (3, 1)).T
-
-        return (A - B) / W
+        return np.array(rational_bezier_surf_dsdu_uvvecs(P, self.weights, u, v))
 
     def dSdv(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the first derivative with respect to :math:`v` at a single :math:`(u,v)` pair
 
-        n, m = self.degree_u, self.degree_v
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
         P = self.get_control_point_array()
-        #assert type(u) == type(v)
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_dsdv(P, self.weights, u, v))
 
-        weight_arr = np.array([[bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * self.weights[i, j]
-                                for j in range(m + 1)] for i in range(n + 1)])
-        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
+    def dSdv_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
 
-        point_arr = np.array([[np.array([(bernstein_poly(n, i, u) * bernstein_poly(m, j, v) *
-                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
-                               for j in range(m + 1)] for i in range(n + 1)])
-        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
 
-        point_arr_deriv = np.array([[np.array([((bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v)) *
-                                                bernstein_poly(n, i, u) * self.weights[i, j])]).T @
-                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
-
-        weight_arr_deriv = np.array([[(bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v)) *
-                                      bernstein_poly(n, i, u) * self.weights[i, j]
-                                      for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
-
-        A = m * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
-        B = m * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
-        W = np.tile(weight_sum ** 2, (3, 1)).T
-
-        return (A - B) / W
-
-    def d2Sdu2(self, u: float or np.ndarray, v: float or np.ndarray):
-        n, m = self.degree_u, self.degree_v
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
         P = self.get_control_point_array()
-        #assert type(u) == type(v)
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_dsdv_grid(P, self.weights, Nu, Nv))
 
-        weight_arr = np.array([[bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * self.weights[i, j]
-                                for j in range(m + 1)] for i in range(n + 1)])
-        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
+    def dSdv_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
 
-        point_arr = np.array([[np.array([(bernstein_poly(n, i, u) * bernstein_poly(m, j, v) *
-                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
-                               for j in range(m + 1)] for i in range(n + 1)])
-        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
 
-        point_arr_deriv = np.array([[np.array([((bernstein_poly(n - 1, i - 1, u) - bernstein_poly(n - 1, i, u)) *
-                                                bernstein_poly(m, j, v) * self.weights[i, j])]).T @
-                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_dsdv_uvvecs(P, self.weights, u, v))
 
-        weight_arr_deriv = np.array([[(bernstein_poly(n - 1, i - 1, u) - bernstein_poly(n - 1, i, u)) *
-                                      bernstein_poly(m, j, v) * self.weights[i, j]
-                                      for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
+    def d2Sdu2(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` at a single :math:`(u,v)` pair
 
-        point_arr_deriv2 = np.array([[np.array([((bernstein_poly(n - 2, i - 2, u) -
-                                                  2 * bernstein_poly(n - 2, i - 1, u) +
-                                                  bernstein_poly(n - 2, i, u)) *
-                                                 bernstein_poly(m, j, v) * self.weights[i, j])]).T @
-                                      np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv2_sum = point_arr_deriv2.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
 
-        weight_arr_deriv2 = np.array([[(bernstein_poly(n - 2, i - 2, u) -
-                                        2 * bernstein_poly(n - 2, i - 1, u) +
-                                        bernstein_poly(n - 2, i, u)) *
-                                       bernstein_poly(m, j, v) * self.weights[i, j]
-                                       for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv2_sum = weight_arr_deriv2.reshape(-1, weight_arr_deriv2.shape[-1]).sum(axis=0)
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdu2(P, self.weights, u, v))
 
-        A = n * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
-        B = n * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
-        W = np.tile(weight_sum ** 2, (3, 1)).T
+    def d2Sdu2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
 
-        dA = n ** 2 * np.tile(weight_deriv_sum, (3, 1)).T * point_deriv_sum + np.tile(
-            weight_sum, (3, 1)).T * point_deriv2_sum
-        dB = n ** 2 * point_deriv_sum * np.tile(weight_deriv_sum, (3, 1)).T + point_sum * np.tile(
-            weight_deriv2_sum, (3, 1)).T
-        dW = 2 * n * np.tile(weight_sum, (3, 1)).T * np.tile(weight_deriv_sum, (3, 1)).T
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
 
-        return (W * (dA - dB) - dW * (A - B)) / W ** 2
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdu2_grid(P, self.weights, Nu, Nv))
+
+    def d2Sdu2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdu2_uvvecs(P, self.weights, u, v))
 
     def d2Sdv2(self, u: float or np.ndarray, v: float or np.ndarray):
-        n, m = self.degree_u, self.degree_v
+        r"""
+        Evaluates the second derivative with respect to :math:`v` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
         P = self.get_control_point_array()
-        #assert type(u) == type(v)
-        u, v = self._cast_uv(u, v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
+        return np.array(rational_bezier_surf_d2sdv2(P, self.weights, u, v))
 
-        weight_arr = np.array([[bernstein_poly(n, i, u) * bernstein_poly(m, j, v) * self.weights[i, j]
-                                for j in range(m + 1)] for i in range(n + 1)])
-        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
+    def d2Sdv2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
 
-        point_arr = np.array([[np.array([(bernstein_poly(n, i, u) * bernstein_poly(m, j, v) *
-                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
-                               for j in range(m + 1)] for i in range(n + 1)])
-        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
 
-        point_arr_deriv = np.array([[np.array([((bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v)) *
-                                                bernstein_poly(n, i, u) * self.weights[i, j])]).T @
-                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdv2_grid(P, self.weights, Nu, Nv))
 
-        weight_arr_deriv = np.array([[(bernstein_poly(m - 1, j - 1, v) - bernstein_poly(m - 1, j, v)) *
-                                      bernstein_poly(n, i, u) * self.weights[i, j]
-                                      for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
+    def d2Sdv2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
 
-        point_arr_deriv2 = np.array([[np.array([((bernstein_poly(m - 2, j - 2, v) -
-                                                  2 * bernstein_poly(m - 2, j - 1, v) +
-                                                  bernstein_poly(m - 2, j, v)) *
-                                                 bernstein_poly(n, i, u) * self.weights[i, j])]).T @
-                                      np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv2_sum = point_arr_deriv2.reshape(-1, len(u), 3).sum(axis=0)
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
 
-        weight_arr_deriv2 = np.array([[(bernstein_poly(m - 2, j - 2, v) -
-                                        2 * bernstein_poly(m - 2, j - 1, v) +
-                                        bernstein_poly(m - 2, j, v)) *
-                                       bernstein_poly(n, i, u) * self.weights[i, j]
-                                       for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv2_sum = weight_arr_deriv2.reshape(-1, weight_arr_deriv2.shape[-1]).sum(axis=0)
-
-        A = m * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
-        B = m * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
-        W = np.tile(weight_sum ** 2, (3, 1)).T
-
-        dA = m ** 2 * np.tile(weight_deriv_sum, (3, 1)).T * point_deriv_sum + np.tile(
-            weight_sum, (3, 1)).T * point_deriv2_sum
-        dB = m ** 2 * point_deriv_sum * np.tile(weight_deriv_sum, (3, 1)).T + point_sum * np.tile(
-            weight_deriv2_sum, (3, 1)).T
-        dW = 2 * m * np.tile(weight_sum, (3, 1)).T * np.tile(weight_deriv_sum, (3, 1)).T
-
-        return (W * (dA - dB) - dW * (A - B)) / W ** 2
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(rational_bezier_surf_d2sdv2_uvvecs(P, self.weights, u, v))
 
     def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
+        r"""
+        Evaluates the surface at ``n_points`` parameter locations along a given edge.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the edge curve. Default: 10
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
         if edge == SurfaceEdge.v1:
             return np.array([self.evaluate(u, 1.0) for u in np.linspace(0.0, 1.0, n_points)])
         elif edge == SurfaceEdge.v0:
@@ -2101,51 +2303,79 @@ class RationalBezierSurface(Surface):
         else:
             raise ValueError(f"No edge called {edge}")
 
-    def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
+    def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular derivative along a surface edge at ``n_points`` parameter locations.
+        The derivative represents either :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}` or
+        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([(self.dSdv(u, 1.0) if perp else
-                              self.dSdu(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_dsdv_iso_v(P, self.weights, n_points, 1.0)) if perp else np.array(
+                rational_bezier_surf_dsdu_iso_v(P, self.weights, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([(self.dSdv(u, 0.0) if perp else
-                              self.dSdu(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_dsdv_iso_v(P, self.weights, n_points, 0.0)) if perp else np.array(
+                rational_bezier_surf_dsdu_iso_v(P, self.weights, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([(self.dSdu(1.0, v) if perp else
-                              self.dSdv(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_dsdu_iso_u(P, self.weights, 1.0, n_points)) if perp else np.array(
+                rational_bezier_surf_dsdv_iso_u(P, self.weights, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([(self.dSdu(0.0, v) if perp else
-                              self.dSdv(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_dsdu_iso_u(P, self.weights, 0.0, n_points)) if perp else np.array(
+                rational_bezier_surf_dsdv_iso_u(P, self.weights, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
-    def get_first_derivs_along_edge_v2(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
-        if edge == SurfaceEdge.v1:
-            return np.array([(self.dSdv_v2(u, 1.0) if perp else
-                              self.dSdu_v2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
-        elif edge == SurfaceEdge.v0:
-            return np.array([(self.dSdv_v2(u, 0.0) if perp else
-                              self.dSdu_v2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
-        elif edge == SurfaceEdge.u1:
-            return np.array([(self.dSdu_v2(1.0, v) if perp else
-                              self.dSdv_v2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
-        elif edge == SurfaceEdge.u0:
-            return np.array([(self.dSdu_v2(0.0, v) if perp else
-                              self.dSdv_v2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
-        else:
-            raise ValueError(f"No edge called {edge}")
+    def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular second derivative along a surface edge at ``n_points`` parameter
+        locations. The derivative represents either :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}` or
+        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}` depending on which edge is selected and which value is
+        assigned to ``perp``.
 
-    def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp=True) -> np.ndarray:
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the second derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the second derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
         if edge == SurfaceEdge.v1:
-            return np.array([(self.d2Sdv2(u, 1.0) if perp else
-                              self.d2Sdu2(u, 1.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_d2sdv2_iso_v(P, self.weights, n_points, 1.0)) if perp else np.array(
+                rational_bezier_surf_d2sdu2_iso_v(P, self.weights, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array([(self.d2Sdv2(u, 0.0) if perp else
-                              self.d2Sdu2(u, 0.0)) for u in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_d2sdv2_iso_v(P, self.weights, n_points, 0.0)) if perp else np.array(
+                rational_bezier_surf_d2sdu2_iso_v(P, self.weights, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array([(self.d2Sdu2(1.0, v) if perp else
-                              self.d2Sdv2(1.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_d2sdu2_iso_u(P, self.weights, 1.0, n_points)) if perp else np.array(
+                rational_bezier_surf_d2sdv2_iso_u(P, self.weights, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array([(self.d2Sdu2(0.0, v) if perp else
-                              self.d2Sdv2(0.0, v)) for v in np.linspace(0.0, 1.0, n_points)])
+            return np.array(rational_bezier_surf_d2sdu2_iso_u(P, self.weights, 0.0, n_points)) if perp else np.array(
+                rational_bezier_surf_d2sdv2_iso_u(P, self.weights, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
 
@@ -2356,10 +2586,10 @@ class RationalBezierSurface(Surface):
             return de_casteljau(i, j - 1, k) * (1 - u0) + de_casteljau(i + 1, j - 1, k) * u0
 
         bez_surf_split_1_Pw = np.array([
-            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_u)] for k in range(self.Nv)
         ])
         bez_surf_split_2_Pw = np.array([
-            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in range(self.Nv)
         ])
 
         transposed_Pw_1 = np.transpose(bez_surf_split_1_Pw, (1, 0, 2))
@@ -2404,10 +2634,10 @@ class RationalBezierSurface(Surface):
             return de_casteljau(i, j - 1, k) * (1 - v0) + de_casteljau(i + 1, j - 1, k) * v0
 
         bez_surf_split_1_Pw = np.array([
-            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nv)] for k in range(self.n_points_u)
         ])
         bez_surf_split_2_Pw = np.array([
-            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.Nv)] for k in range(self.n_points_u)
         ])
 
         P1, w1 = self.project_homogeneous_control_points(bez_surf_split_1_Pw)
@@ -2424,11 +2654,11 @@ class RationalBezierSurface(Surface):
         points = []
         lines = []
 
-        for i in range(self.Nu):
+        for i in range(self.n_points_u):
             for j in range(self.Nv):
                 points.append(Point3D.from_array(control_points[i, j, :]))
 
-        for i in range(self.Nu - 1):
+        for i in range(self.n_points_u - 1):
             for j in range(self.Nv - 1):
                 point_obj_1 = Point3D.from_array(control_points[i, j, :])
                 point_obj_2 = Point3D.from_array(control_points[i + 1, j, :])
@@ -2438,7 +2668,7 @@ class RationalBezierSurface(Surface):
                 line_2 = Line3D(p0=point_obj_1, p1=point_obj_3)
                 lines.extend([line_1, line_2])
 
-                if i < self.Nu - 2 and j < self.Nv - 2:
+                if i < self.n_points_u - 2 and j < self.Nv - 2:
                     continue
 
                 point_obj_4 = Point3D.from_array(control_points[i + 1, j + 1, :])
@@ -2496,48 +2726,24 @@ class NURBSSurface(Surface):
         self.weights = weights
 
     @property
-    def Nu(self) -> int:
-        """
-        Number of control points in the :math:`u`-parametric direction
-
-        Returns
-        -------
-        int
-        """
+    def n_points_u(self) -> int:
+        """Number of control points in the :math:`u`-parametric direction"""
         return len(self.points)
 
     @property
-    def Nv(self) -> int:
-        """
-        Number of control points in the :math:`v`-parametric direction
-
-        Returns
-        -------
-        int
-        """
+    def n_points_v(self) -> int:
+        """Number of control points in the :math:`v`-parametric direction"""
         return len(self.points[0])
 
     @property
     def degree_u(self) -> int:
-        """
-        Surface degree in the :math:`u`-parametric direction
-
-        Returns
-        -------
-        int
-        """
-        return len(self.knots_u) - self.Nu - 1
+        """Surface degree in the :math:`u`-parametric direction"""
+        return len(self.knots_u) - self.n_points_u - 1
 
     @property
     def degree_v(self) -> int:
-        """
-        Surface degree in the :math:`v`-parametric direction
-
-        Returns
-        -------
-        int
-        """
-        return len(self.knots_v) - self.Nv - 1
+        """Surface degree in the :math:`v`-parametric direction"""
+        return len(self.knots_v) - self.n_points_v - 1
 
     @property
     def n(self) -> int:
@@ -2713,8 +2919,8 @@ class NURBSSurface(Surface):
             Number of control points parallel to the edge
         """
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
-            return self.Nu
-        return self.Nv
+            return self.n_points_u
+        return self.n_points_v
 
     def get_perpendicular_control_point_length(self, surface_edge: SurfaceEdge) -> int:
         r"""
@@ -2731,8 +2937,8 @@ class NURBSSurface(Surface):
             Number of control points perpendicular to the edge
         """
         if surface_edge in [SurfaceEdge.v1, SurfaceEdge.v0]:
-            return self.Nv
-        return self.Nu
+            return self.n_points_v
+        return self.n_points_u
 
     def get_parallel_degree(self, surface_edge: SurfaceEdge) -> int:
         r"""
@@ -3035,18 +3241,365 @@ class NURBSSurface(Surface):
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
         self.enforce_g0g1g2(other, 1.0, surface_edge, other_surface_edge)
 
+    def dSdu(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdu(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def dSdu_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdu_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
+
+    def dSdu_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdu_uvvecs(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def dSdv(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the first derivative with respect to :math:`v` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdv(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def dSdv_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the first derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdv_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
+
+    def dSdv_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the first derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_dsdv_uvvecs(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdu2(self, u: float, v: float) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdu2(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdu2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`u` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdu2_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
+
+    def d2Sdu2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`u` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdu2_uvvecs(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdv2(self, u: float or np.ndarray, v: float or np.ndarray):
+        r"""
+        Evaluates the second derivative with respect to :math:`v` at a single :math:`(u,v)` pair
+
+        Parameters
+        ----------
+        u: float
+            Position along :math:`u` in parametric space. Normally in the range :math:`[0,1]`
+        v: float
+            Position along :math:`v` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array containing the :math:`x`-, :math:`y`-, and :math:`z`-components of the second derivative
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdv2(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def d2Sdv2_grid(self, Nu: int, Nv: int) -> np.ndarray:
+        r"""
+        Evaluates the second derivative with respect to :math:`v` on a linearly-spaced grid of :math:`u`- and
+        :math:`v`-values.
+
+        Parameters
+        ----------
+        Nu: int
+            Number of evenly spaced :math:`u` values
+        Nv: int
+            Number of evenly spaced :math:`v` values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`N_u \times N_v \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdv2_grid(P, self.weights, self.knots_u, self.knots_v, Nu, Nv))
+
+    def d2Sdv2_uvvecs(self, u: np.ndarray, v: np.ndarray):
+        r"""
+        Evaluates the second derivative of the surface with respect to :math:`v` at arbitrary vectors of
+        :math:`u` and :math:`v`-values.
+
+        Parameters
+        ----------
+        u: np.ndarray
+            1-D array of :math:`u`-parameter values
+        v: np.ndarray
+            1-D array of :math:`v`-parameter values
+
+        Returns
+        -------
+        np.ndarray
+            Array of size :math:`\text{len}(u) \times \text{len}(v) \times 3`
+        """
+        P = self.get_control_point_array()
+        return np.array(nurbs_surf_d2sdv2_uvvecs(P, self.weights, self.knots_u, self.knots_v, u, v))
+
+    def get_edge(self, edge: SurfaceEdge, n_points: int = 10) -> np.ndarray:
+        r"""
+        Evaluates the surface at ``n_points`` parameter locations along a given edge.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the edge curve. Default: 10
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        if edge == SurfaceEdge.v1:
+            return np.array([self.evaluate(u, 1.0) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.v0:
+            return np.array([self.evaluate(u, 0.0) for u in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.u1:
+            return np.array([self.evaluate(1.0, v) for v in np.linspace(0.0, 1.0, n_points)])
+        elif edge == SurfaceEdge.u0:
+            return np.array([self.evaluate(0.0, v) for v in np.linspace(0.0, 1.0, n_points)])
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def get_first_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular derivative along a surface edge at ``n_points`` parameter locations.
+        The derivative represents either :math:`\frac{\partial \mathbf{S}(u,v)}{\partial u}` or
+        :math:`\frac{\partial \mathbf{S}(u,v)}{\partial v}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
+        if edge == SurfaceEdge.v1:
+            return np.array(nurbs_surf_dsdv_iso_v(
+                P, self.weights, self.knots_u, self.knots_v, n_points, 1.0)) if perp else np.array(
+                nurbs_surf_dsdu_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 1.0))
+        elif edge == SurfaceEdge.v0:
+            return np.array(nurbs_surf_dsdv_iso_v(
+                P, self.weights, self.knots_u, self.knots_v, n_points, 0.0)) if perp else np.array(
+                nurbs_surf_dsdu_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 0.0))
+        elif edge == SurfaceEdge.u1:
+            return np.array(nurbs_surf_dsdu_iso_u(
+                P, self.weights, self.knots_u, self.knots_v, 1.0, n_points)) if perp else np.array(
+                nurbs_surf_dsdv_iso_u(P, self.weights, self.knots_u, self.knots_v, 1.0, n_points))
+        elif edge == SurfaceEdge.u0:
+            return np.array(nurbs_surf_dsdu_iso_u(
+                P, self.weights, self.knots_u, self.knots_v, 0.0, n_points)) if perp else np.array(
+                nurbs_surf_dsdv_iso_u(P, self.weights, self.knots_u, self.knots_v, 0.0, n_points))
+        else:
+            raise ValueError(f"No edge called {edge}")
+
+    def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
+        r"""
+        Evaluates the parallel or perpendicular second derivative along a surface edge at ``n_points`` parameter
+        locations. The derivative represents either :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial u^2}` or
+        :math:`\frac{\partial^2 \mathbf{S}(u,v)}{\partial v^2}` depending on which edge is selected and which value is
+        assigned to ``perp``.
+
+        Parameters
+        ----------
+        edge: SurfaceEdge
+            Edge along which to evaluate
+        n_points: int
+            Number of evenly-spaced parameter locations at which to evaluate the second derivative. Default: 10
+        perp: bool
+            Whether to evaluate the cross-derivative. If ``False``, the second derivative along the parameter direction
+            parallel to the edge will be evaluated instead. Default: ``True``
+
+        Returns
+        -------
+        numpy.ndarray
+            2-D array of size :math:`n_\text{points} \times 3`
+        """
+        P = self.get_control_point_array()
+        if edge == SurfaceEdge.v1:
+            return np.array(nurbs_surf_d2sdv2_iso_v(
+                P, self.weights, self.knots_u, self.knots_v, n_points, 1.0)) if perp else np.array(
+                nurbs_surf_d2sdu2_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 1.0))
+        elif edge == SurfaceEdge.v0:
+            return np.array(nurbs_surf_d2sdv2_iso_v(
+                P, self.weights, self.knots_u, self.knots_v, n_points, 0.0)) if perp else np.array(
+                nurbs_surf_d2sdu2_iso_v(P, self.weights, self.knots_u, self.knots_v, n_points, 0.0))
+        elif edge == SurfaceEdge.u1:
+            return np.array(nurbs_surf_d2sdu2_iso_u(
+                P, self.weights, self.knots_u, self.knots_v, 1.0, n_points)) if perp else np.array(
+                nurbs_surf_d2sdv2_iso_u(P, self.weights, self.knots_u, self.knots_v, 1.0, n_points))
+        elif edge == SurfaceEdge.u0:
+            return np.array(nurbs_surf_d2sdu2_iso_u(
+                P, self.weights, self.knots_u, self.knots_v, 0.0, n_points)) if perp else np.array(
+                nurbs_surf_d2sdv2_iso_u(P, self.weights, self.knots_u, self.knots_v, 0.0, n_points))
+        else:
+            raise ValueError(f"No edge called {edge}")
+
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
 
         control_points = self.get_control_point_array()
         points = []
         lines = []
 
-        for i in range(self.Nu):
-            for j in range(self.Nv):
+        for i in range(self.n_points_u):
+            for j in range(self.n_points_v):
                 points.append(Point3D.from_array(control_points[i, j, :]))
 
-        for i in range(self.Nu - 1):
-            for j in range(self.Nv - 1):
+        for i in range(self.n_points_u - 1):
+            for j in range(self.n_points_v - 1):
                 point_obj_1 = Point3D.from_array(control_points[i, j, :])
                 point_obj_2 = Point3D.from_array(control_points[i + 1, j, :])
                 point_obj_3 = Point3D.from_array(control_points[i, j + 1, :])
@@ -3055,7 +3608,7 @@ class NURBSSurface(Surface):
                 line_2 = Line3D(p0=point_obj_1, p1=point_obj_3)
                 lines.extend([line_1, line_2])
 
-                if i < self.Nu - 2 and j < self.Nv - 2:
+                if i < self.n_points_u - 2 and j < self.n_points_v - 2:
                     continue
 
                 point_obj_4 = Point3D.from_array(control_points[i + 1, j + 1, :])
@@ -3105,179 +3658,3 @@ class TrimmedSurface(Surface):
             outer_boundary_iges,
             inner_boundaries_iges
         )
-
-
-class PlanarFillSurfaceCreator:
-    def __init__(self, closed_curve_loop_list: typing.List[
-        Bezier3D or RationalBezierCurve3D or NURBSCurve3D or BSpline3D or Line3D]):
-        """
-        Generator class for fill surfaces comprised of point-curve polar-like patches.
-
-        .. warning::
-            The curves must be co-planar to achieve the expected result
-        """
-        self.closed_curve_loop_list = closed_curve_loop_list
-        self.validate()
-
-    def validate(self):
-        endpoints = {}
-        for curve in self.closed_curve_loop_list:
-            endpoint_1 = curve.control_points[0]
-            endpoint_2 = curve.control_points[-1]
-            for endpoint_to_test in [endpoint_1, endpoint_2]:
-                for endpoint in endpoints:
-                    if endpoint.almost_equals(endpoint_to_test):
-                        endpoints[endpoint] = True
-                        break
-                else:
-                    endpoints[endpoint_to_test] = False
-
-        for v in endpoints.values():
-            if v:
-                continue
-            raise ValueError("Assigned curve loop is not closed")
-
-    def get_ordered_curve_list(self) -> (
-            typing.List[Bezier3D or NURBSCurve3D or BSpline3D or RationalBezierCurve3D or Line3D],
-            typing.List[Point3D]):
-        # Copy a list of the curves
-        curve_stack = deepcopy(self.closed_curve_loop_list)
-        ordered_curve_list = [deepcopy(curve_stack[0])]
-
-        # Get points for first curve. This will set the starting point and the direction of the curve loop.
-        point_loop = curve_stack.pop(0).control_points
-
-        while curve_stack:  # Loop until the curve stack is empty
-            for curve_idx, curve in enumerate(curve_stack):
-                if point_loop[-1].almost_equals(curve.control_points[0]):
-                    ordered_curve_list.append(curve)
-                    point_loop.extend(curve_stack.pop(curve_idx).control_points[1:])
-                    break  # Go to the next curve in the stack
-                elif point_loop[-1].almost_equals(curve.control_points[-1]):
-                    ordered_curve_list.append(curve.reverse())
-                    point_loop.extend(curve_stack.pop(curve_idx).control_points[:-1][::-1])
-                    break  # Go to the next curve in the stack
-
-        return ordered_curve_list, point_loop
-
-    @staticmethod
-    def get_envelope(ordered_curve_list: typing.List[
-        Bezier3D or BSpline3D or NURBSCurve3D or RationalBezierCurve3D or Line3D],
-                     control_point_loop: typing.List[Point3D]) -> (list, BezierSurface):
-        loop_array = np.array([p.as_array() for p in control_point_loop])
-        parametric_curves = []
-
-        # Need to convert to 2-D to use shapely. Get the coordinate system of the plane containing the points
-        # using cross products of vectors described by the points
-        v1 = Vector3D(control_point_loop[0], control_point_loop[1])
-        v2 = Vector3D(control_point_loop[0], control_point_loop[2])
-        v3 = v1.cross(v2)
-        v4 = v1.cross(v3)
-
-        # The coordinate system is now fully described by v1, v3, and v4. v1 and v4 are the in-plane components,
-        # while v3 is the out-of-plane component. The origin of this coordinate system is at control_point_loop[0].
-        loop_array_transformed = aerocaps.transform_points_into_coordinate_system(
-            loop_array, [v1, v4, v3], [aerocaps.IHat3D(), aerocaps.JHat3D(), aerocaps.KHat3D()]
-        )
-        # Make sure that all the curves are coplanar
-        if not all([np.isclose(z, loop_array_transformed[0, 2]) for z in loop_array_transformed[1:, 2]]):
-            raise ValueError("Curves are not all coplanar!")
-        loop_array_2d = loop_array_transformed[:, :2]
-        z_plane = loop_array_transformed[0, 2]
-
-        # Create the polygon and find a point representing the center of the polygon while guaranteed to be inside
-        # the polygon
-        polygon = shapely.Polygon(loop_array_2d)
-        envelope_2d = np.array(shapely.envelope(polygon).exterior.coords)
-        envelope_2d[0, 0] -= 3.0
-        envelope_2d[0, 1] -= 3.0
-        envelope_2d[1, 0] += 3.0
-        envelope_2d[1, 1] -= 3.0
-        envelope_2d[2, 0] += 3.0
-        envelope_2d[2, 1] += 3.0
-        envelope_2d[3, 0] -= 3.0
-        envelope_2d[3, 1] += 3.0
-        x_min, x_max = envelope_2d[:, 0].min(), envelope_2d[:, 0].max()
-        y_min, y_max = envelope_2d[:, 1].min(), envelope_2d[:, 1].max()
-        dx, dy = (x_max - x_min), (y_max - y_min)
-
-        # Get parametric curves in the plane defined by the envelope for each curve in the ordered curve list
-        for curve in ordered_curve_list:
-            cps_transformed = aerocaps.transform_points_into_coordinate_system(
-                curve.get_control_point_array(), [v1, v4, v3], [aerocaps.IHat3D(), aerocaps.JHat3D(), aerocaps.KHat3D()]
-            )
-            cps_x = cps_transformed[:, 0]
-            cps_y = cps_transformed[:, 1]
-            u = [(cp_x - x_min) / dx for cp_x in cps_x]
-            v = [(cp_y - y_min) / dy for cp_y in cps_y]
-            uv = np.array([u, v]).T
-            uv0 = np.column_stack((uv, np.zeros(uv.shape[0])))
-            if isinstance(curve, Line3D):
-                parametric_curve = curve.__class__(p0=Point3D.from_array(uv0[0, :]), p1=Point3D.from_array(uv0[1, :]))
-            elif isinstance(curve, Bezier3D):
-                parametric_curve = curve.__class__.generate_from_array(uv0)
-            elif isinstance(curve, BSpline3D):
-                parametric_curve = curve.__class__(uv0, curve.knot_vector, curve.degree)
-            elif isinstance(curve, RationalBezierCurve3D):
-                parametric_curve = curve.__class__.generate_from_array(uv0, curve.weights)
-            elif isinstance(curve, NURBSCurve3D):
-                parametric_curve = curve.__class__(uv0, curve.weights, curve.knot_vector, curve.degree)
-            else:
-                raise ValueError(f"Invalid curve type {type(curve)}")
-            parametric_curves.append(parametric_curve)
-
-        envelope_3d = np.column_stack((envelope_2d, z_plane * np.ones(envelope_2d.shape[0])))
-
-        # Transform the newly created envelope back into the original coordinate system
-        reverse_transformed_envelope_3d = aerocaps.transform_points_into_coordinate_system(
-            envelope_3d, [aerocaps.IHat3D(), aerocaps.JHat3D(), aerocaps.KHat3D()], [v1, v4, v3]
-        )
-
-        # Create a planar rectangular surface from the transformed points
-        pa = Point3D.from_array(reverse_transformed_envelope_3d[0, :])
-        pb = Point3D.from_array(reverse_transformed_envelope_3d[1, :])
-        pc = Point3D.from_array(reverse_transformed_envelope_3d[2, :])
-        pd = Point3D.from_array(reverse_transformed_envelope_3d[3, :])
-        planar_surf = aerocaps.BezierSurface([[pa, pd], [pb, pc]])
-
-        return parametric_curves, planar_surf
-
-    def generate(self) -> (list, list, BezierSurface):
-
-        ordered_curve_list, control_point_loop = self.get_ordered_curve_list()
-        parametric_curves, planar_surf = self.get_envelope(
-            ordered_curve_list, control_point_loop
-        )
-
-        return ordered_curve_list, parametric_curves, planar_surf
-
-    def to_iges(self) -> typing.List[aerocaps.iges.entity.IGESEntity]:
-        entities = []
-        ordered_curve_list, parametric_curves, planar_surf = self.generate()
-
-        # Create the composite curves
-        composite = aerocaps.CompositeCurve3D(ordered_curve_list)
-        composite_para = aerocaps.CompositeCurve3D(parametric_curves)
-
-        # Create the definition for the parametric curve
-        curve_on_parametric_surface = aerocaps.CurveOnParametricSurface(
-            planar_surf,
-            composite_para,
-            composite
-        )
-
-        # Create the trimmed surface object
-        trimmed_surf = aerocaps.TrimmedSurface(planar_surf, curve_on_parametric_surface)
-
-        # Compile the list of entities
-        K1 = len(ordered_curve_list)
-        K2 = K1 + len(parametric_curves)
-        entities = [curve.to_iges() for curve in ordered_curve_list]
-        entities.extend([curve.to_iges() for curve in parametric_curves])
-        entities.append(composite.to_iges(entities[0:K1]))
-        entities.append(composite_para.to_iges(entities[K1:K2]))
-        entities.append(planar_surf.to_iges())
-        entities.append(curve_on_parametric_surface.to_iges(entities[K2 + 2], entities[K2 + 1], entities[K2]))
-        entities.append(trimmed_surf.to_iges(entities[K2 + 2], entities[K2 + 3]))
-
-        return entities
