@@ -1501,7 +1501,7 @@ class RationalBezierSurface(Surface):
     @property
     def knots_u(self) -> np.ndarray:
         """Knots in the :math:`u`-direction"""
-        return self.knots_u
+        return self._knots_u
 
     @property
     def knots_v(self) -> np.ndarray:
@@ -4099,7 +4099,7 @@ class BSplineSurface(Surface):
 
         return points, lines
 
-    def plot_surface(self, plot: pv.Plotter, Nu: int, Nv: int, **mesh_kwargs):
+    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs):
         """
         Plots the B-spline surface using the `pyvista <https://pyvista.org/>`_ library
 
@@ -5361,7 +5361,7 @@ class NURBSSurface(Surface):
 
         return points, lines
 
-    def plot_surface(self, plot: pv.Plotter, Nu: int, Nv: int, **mesh_kwargs):
+    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs):
         """
         Plots the NURBS surface using the `pyvista <https://pyvista.org/>`_ library
 
