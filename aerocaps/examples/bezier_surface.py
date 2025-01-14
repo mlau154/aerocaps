@@ -37,6 +37,6 @@ def bezier_surface_2x3() -> ac.BezierSurface:
     control_points = np.stack((row_1, row_2, row_3), axis=0)
 
     # Generate the surface from the array
-    surf = ac.BezierSurface.generate_from_array(control_points)
+    surf = ac.BezierSurface(control_points)
 
     return surf

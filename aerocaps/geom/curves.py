@@ -46,34 +46,145 @@ _projection_dict = {
 
 
 class PCurveData2D:
-    def __init__(self, t: np.ndarray, xy: np.ndarray, xpyp: np.ndarray, xppypp: np.ndarray, k: np.ndarray,
-                 R: np.ndarray):
+    def __init__(self,
+                 t: float or np.ndarray,
+                 x: float or np.ndarray,
+                 y: float or np.ndarray,
+                 xp: float or np.ndarray,
+                 yp: float or np.ndarray,
+                 xpp: float or np.ndarray,
+                 ypp: float or np.ndarray,
+                 k: float or np.ndarray = None,
+                 R: float or np.ndarray = None):
+        """
+        Data-processing class for 2-D parametric curves. Adds convenience methods for plotting, approximating
+        arc length, and computing curvature combs.
+
+        Parameters
+        ----------
+        t: float or np.ndarray
+            :math:`t`-value or vector for the curve
+        x: float or np.ndarray
+            Value of the curve in the :math:`x`-direction
+        y: float or np.ndarray
+            Value of the curve in the :math:`y`-direction
+        xp: float or np.ndarray
+            First derivative :math:`x`-component of the curve with respect to :math:`t`
+        yp: float or np.ndarray
+            First derivative :math:`y`-component of the curve with respect to :math:`t`
+        xpp: float or np.ndarray
+            Second derivative :math:`x`-component of the curve with respect to :math:`t`
+        ypp: float or np.ndarray
+            Second derivative :math:`y`-component of the curve with respect to :math:`t`
+        k: float or np.ndarray
+            Curvature of the curve. If not specified, it will be computed. Default: ``None``
+        R: float or np.ndarray
+            Radius of curvature of the curve. If not specified, it will be computed. Default: ``None``
+        """
         self.t = t
-        self.xy = xy
-        self.xpyp = xpyp
-        self.xppypp = xppypp
-        self.k = k
-        self.R = R
-        self.R_abs_min = np.min(np.abs(self.R))
+        self.x = x
+        self.y = y
+        self.xp = xp
+        self.yp = yp
+        self.xpp = xpp
+        self.ypp = ypp
+        self.k = k if k is not None else self._compute_curvature()
+        with np.errstate(divide="ignore", invalid="ignore"):
+            self.R = R if R is not None else 1 / self.k
+            self.R_abs_min = np.min(np.abs(self.R))
+
+    def _compute_curvature(self) -> float or np.ndarray:
+        """
+        Computes the curvature from the first and second derivatives
+
+        Returns
+        -------
+        float or np.ndarray
+            Same output type/shape as ``t``
+        """
+        with np.errstate(divide="ignore", invalid="ignore"):
+            A = self.xp * self.ypp - self.yp * self.xpp
+            B = np.hypot(self.xp, self.yp) ** 3
+            return A / B
 
     def plot(self, ax: plt.Axes, **kwargs):
-        ax.plot(self.xy[:, 0], self.xy[:, 1], **kwargs)
+        """
+        Plots the curve on a :obj:`matplotlib.pyplot.Axes`
 
-    def get_curvature_comb(self, max_k_normalized_scale_factor, interval: int = 1):
-        first_deriv_mag = np.hypot(self.xpyp[:, 0], self.xpyp[:, 1])
-        comb_heads_x = self.xy[:, 0] - self.xpyp[:, 1] / first_deriv_mag * self.k * max_k_normalized_scale_factor
-        comb_heads_y = self.xy[:, 1] + self.xpyp[:, 0] / first_deriv_mag * self.k * max_k_normalized_scale_factor
+        .. note::
+
+            If ``t`` is a :obj:`float`, specifying the ``marker`` keyword argument may be desirable as a line
+            plot cannot be generated in this case
+
+        Parameters
+        ----------
+        ax: plt.Axes
+            Axis on which to plot
+        kwargs: dict
+            Keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot`
+        """
+        if isinstance(self.t, float):
+            ax.plot([self.x], [self.y], **kwargs)
+        else:
+            ax.plot(self.x, self.y, **kwargs)
+
+    def get_curvature_comb(self, max_comb_length: float, interval: int = 1) -> (np.ndarray, np.ndarray):
+        """
+        Gets the curvature comb for the curve
+
+        .. note::
+
+            This method will raise an exception if ``t`` is a :obj:`float`
+
+        Parameters
+        ----------
+        max_comb_length: float
+            Length of the comb corresponding to the location of maximum unsigned curvature
+        interval: int
+            Interval between the output combs. If ``1``, the combs corresponding to every evaluated :math:`t`-value
+            will be used. If ``2``, every other comb will be skipped, etc. The first and last combs are
+            guaranteed to be output as long as ``len(t) > 1``. Default: ``1``
+
+        Returns
+        -------
+        numpy.ndarray, numpy.ndarray
+            2-D arrays corresponding to the comb heads and comb tails, respectively. Each array has outer dimension
+            dependent on the interval (if ``interval=1``, the length of this dimension will be ``len(t)``) and
+            inner dimension 2
+        """
+        if isinstance(self.t, float):
+            raise ValueError(f"Curvature comb calculation is only available for array-type curve data")
+        first_deriv_mag = np.hypot(self.xp, self.yp)
+        abs_k = np.abs(self.k)
+        normalized_k = abs_k / max(abs_k)
+        comb_heads_x = self.x - self.yp / first_deriv_mag * normalized_k * max_comb_length
+        comb_heads_y = self.y + self.xp / first_deriv_mag * normalized_k * max_comb_length
         # Stack the x and y columns (except for the last x and y values) horizontally and keep only the rows by the
         # specified interval:
-        comb_tails = np.column_stack((self.xy[:, 0], self.xy[:, 1]))[:-1:interval, :]
+        comb_tails = np.column_stack((self.x, self.y))[:-1:interval, :]
         comb_heads = np.column_stack((comb_heads_x, comb_heads_y))[:-1:interval, :]
         # Add the last x and y values onto the end (to make sure they do not get skipped with input interval)
-        comb_tails = np.vstack((comb_tails, np.array([self.xy[-1, 0], self.xy[-1, 1]])))
+        comb_tails = np.vstack((comb_tails, np.array([self.x[-1], self.y[-1]])))
         comb_heads = np.vstack((comb_heads, np.array([comb_heads_x[-1], comb_heads_y[-1]])))
         return comb_tails, comb_heads
 
-    def approximate_arc_length(self):
-        return np.sum(np.hypot(self.xy[1:, 0] - self.xy[:-1, 0], self.xy[1:, 1] - self.xy[:-1, 1]))
+    def approximate_arc_length(self) -> np.ndarray:
+        """
+        Approximates the arc-length of the curve by summing the arc-lengths of each segment of the evaluated
+        polyline
+
+        .. note::
+
+            This method will raise an exception if ``t`` is a :obj:`float`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array with :math:`(\text{len}(t) - 1)` elements
+        """
+        if isinstance(self.t, float):
+            raise ValueError(f"Arc-length calculation is only available for array-type curve data")
+        return np.sum(np.hypot(self.x[1:] - self.x[:-1], self.y[1:] - self.y[:-1]))
 
 
 class PCurve2D(Geometry2D):
@@ -82,47 +193,202 @@ class PCurve2D(Geometry2D):
         pass
 
     @abstractmethod
-    def evaluate_single_t(self, t: float) -> np.ndarray:
+    def evaluate(self, t: float) -> np.ndarray:
         pass
 
     @abstractmethod
-    def evaluate(self, t: np.ndarray = None) -> PCurveData2D:
+    def evaluate_grid(self, nt: int = 100) -> PCurveData2D:
+        pass
+
+    @abstractmethod
+    def evaluate_tvec(self, t: np.ndarray) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def dcdt(self, t: float) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def d2cdt2(self, t: float) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def evaluate_pcurvedata(self, t: np.ndarray = None, nt: int = None) -> PCurveData2D:
         pass
 
 
 class PCurveData3D:
-    def __init__(self, t: np.ndarray, xyz: np.ndarray, xpypzp: np.ndarray, xppyppzpp: np.ndarray, k: np.ndarray,
-                 R: np.ndarray):
+    def __init__(self,
+                 t: float or np.ndarray,
+                 x: float or np.ndarray,
+                 y: float or np.ndarray,
+                 z: float or np.ndarray,
+                 xp: float or np.ndarray,
+                 yp: float or np.ndarray,
+                 zp: float or np.ndarray,
+                 xpp: float or np.ndarray,
+                 ypp: float or np.ndarray,
+                 zpp: float or np.ndarray,
+                 k: float or np.ndarray = None,
+                 R: float or np.ndarray = None):
+        """
+        Data-processing class for 3-D parametric curves. Adds convenience methods for plotting, approximating
+        arc length, and computing curvature combs.
+
+        Parameters
+        ----------
+        t: float or np.ndarray
+            :math:`t`-value or vector for the curve
+        x: float or np.ndarray
+            Value of the curve in the :math:`x`-direction
+        y: float or np.ndarray
+            Value of the curve in the :math:`y`-direction
+        z: float or np.ndarray
+            Value of the curve in the :math:`x`-direction
+        xp: float or np.ndarray
+            First derivative :math:`x`-component of the curve with respect to :math:`t`
+        yp: float or np.ndarray
+            First derivative :math:`y`-component of the curve with respect to :math:`t`
+        zp: float or np.ndarray
+            First derivative :math:`z`-component of the curve with respect to :math:`t`
+        xpp: float or np.ndarray
+            Second derivative :math:`x`-component of the curve with respect to :math:`t`
+        ypp: float or np.ndarray
+            Second derivative :math:`y`-component of the curve with respect to :math:`t`
+        zpp: float or np.ndarray
+            Second derivative :math:`z`-component of the curve with respect to :math:`t`
+        k: float or np.ndarray
+            Curvature of the curve. If not specified, it will be computed. Default: ``None``
+        R: float or np.ndarray
+            Radius of curvature of the curve. If not specified, it will be computed. Default: ``None``
+        """
         self.t = t
-        self.xyz = xyz
-        self.xpypzp = xpypzp
-        self.xppyppzpp = xppyppzpp
-        self.k = k
-        self.R = R
-        self.R_abs_min = np.min(np.abs(self.R))
+        self.x = x
+        self.y = y
+        self.z = z
+        self.xp = xp
+        self.yp = yp
+        self.zp = zp
+        self.xpp = xpp
+        self.ypp = ypp
+        self.zpp = zpp
+        self.k = k if k is not None else self._compute_curvature()
+        with np.errstate(divide="ignore", invalid="ignore"):
+            self.R = R if R is not None else 1 / self.k
+            self.R_abs_min = np.min(np.abs(self.R))
+
+    def _compute_curvature(self) -> float or np.ndarray:
+        """
+        Computes the curvature from the first and second derivatives
+
+        Returns
+        -------
+        float or np.ndarray
+            Same output type/shape as ``t``
+        """
+        with np.errstate(divide="ignore", invalid="ignore"):
+            A = self.zpp * self.yp - self.ypp * self.zp
+            B = self.xpp * self.zp - self.zpp * self.xp
+            C = self.ypp * self.xp - self.xpp * self.yp
+            D = (self.xp ** 2 + self.yp ** 2 + self.zp ** 2) ** 1.5
+            return np.sqrt(A ** 2 + B ** 2 + C ** 2) / D
 
     def plot(self, ax: plt.Axes, **kwargs):
-        ax.plot3D(self.xyz[:, 0], self.xyz[:, 1], self.xyz[:, 2], **kwargs)
+        """
+        Plots the curve on an :obj:`matplotlib.pyplot.Axes`
 
-    def get_curvature_comb(self, max_k_normalized_scale_factor, interval: int = 1):
-        first_deriv_mag = np.sqrt(self.xpypzp[:, 0] ** 2, self.xpypzp[:, 1] ** 2, self.xpypzp[:, 2] ** 2)
-        comb_heads_x = self.xyz[:, 0] - self.xpypzp[:, 1] / first_deriv_mag * self.k * max_k_normalized_scale_factor
-        comb_heads_y = self.xyz[:, 1] + self.xpypzp[:, 0] / first_deriv_mag * self.k * max_k_normalized_scale_factor
-        comb_heads_z = self.xyz[:, 2] + self.xpypzp[:, 0] / first_deriv_mag * self.k * max_k_normalized_scale_factor
+        .. note::
+
+            If ``t`` is a :obj:`float`, specifying the ``marker`` keyword argument may be desirable as a line
+            plot cannot be generated in this case
+
+        Parameters
+        ----------
+        ax: plt.Axes
+            Axis on which to plot
+        kwargs: dict
+            Keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot3D`
+        """
+        ax.plot3D(self.x, self.y, self.z, **kwargs)
+
+    def get_curvature_comb(self, max_comb_length: float, interval: int = 1):
+        """
+        Gets the curvature comb for the curve
+
+        .. note::
+
+            This method will raise an exception if ``t`` is a :obj:`float`
+
+        Parameters
+        ----------
+        max_comb_length: float
+            Length of the comb corresponding to the location of maximum unsigned curvature
+        interval: int
+            Interval between the output combs. If ``1``, the combs corresponding to every evaluated :math:`t`-value
+            will be used. If ``2``, every other comb will be skipped, etc. The first and last combs are
+            guaranteed to be output as long as ``len(t) > 1``. Default: ``1``
+
+        Returns
+        -------
+        numpy.ndarray, numpy.ndarray
+            2-D arrays corresponding to the comb heads and comb tails, respectively. Each array has outer dimension
+            dependent on the interval (if ``interval=1``, the length of this dimension will be ``len(t)``) and
+            inner dimension 3
+        """
+        if isinstance(self.t, float):
+            raise ValueError(f"Curvature comb calculation is only available for array-type curve data")
+        abs_k = np.abs(self.k)
+        normalized_k = abs_k / max(abs_k)
+        rp_vec = np.column_stack((self.xp, self.yp, self.zp))
+        rpp_vec = np.column_stack((self.xpp, self.ypp, self.zpp))
+        rp_mag = np.linalg.norm(rp_vec)
+        T = rp_vec / rp_mag  # Normalized tangent vector
+        with np.errstate(divide="ignore", invalid="ignore"):
+            B_cross = np.cross(rp_vec, rpp_vec)
+            B = B_cross / np.linalg.norm(B_cross)  # Normalized bi-normal vector
+        # Handle the case where the curvature is zero
+        for t_idx in range(len(t)):
+            if not np.isinf(B[t_idx][0]):
+                continue
+            B[t_idx][0] = T[t_idx][0] + 0.5
+            B[t_idx][1] = T[t_idx][1] + 0.5
+            # Ensure that the dot product between the bi-normal and tangent vectors is zero
+            B[t_idx][2] = -(B[t_idx][0] * T[t_idx][0] + B[t_idx][1] * T[t_idx][1]) / T[t_idx][2]
+            # Normalize the resulting vector
+            B[t_idx][:] /= np.linalg.norm(B[t_idx][:])
+        N = np.cross(B, T)  # Normal vector
+        comb_heads_x = self.x[:] + N[:, 0] * normalized_k * max_comb_length
+        comb_heads_y = self.y[:] + N[:, 1] * normalized_k * max_comb_length
+        comb_heads_z = self.z[:] + N[:, 2] * normalized_k * max_comb_length
         # Stack the x and y columns (except for the last x and y values) horizontally and keep only the rows by the
         # specified interval:
-        comb_tails = np.column_stack((self.xyz[:, 0], self.xyz[:, 1], self.xyz[:, 2]))[:-1:interval, :]
+        comb_tails = np.column_stack((self.x, self.y, self.z))[:-1:interval, :]
         comb_heads = np.column_stack((comb_heads_x, comb_heads_y))[:-1:interval, :]
         # Add the last x and y values onto the end (to make sure they do not get skipped with input interval)
-        comb_tails = np.vstack((comb_tails, np.array([self.xyz[-1, 0], self.xyz[-1, 1], self.xyz[-1, 2]])))
+        comb_tails = np.vstack((comb_tails, np.array([self.x[-1], self.y[-1], self.z[-1]])))
         comb_heads = np.vstack((comb_heads, np.array([comb_heads_x[-1], comb_heads_y[-1], comb_heads_z[-1]])))
         return comb_tails, comb_heads
 
-    def approximate_arc_length(self):
+    def approximate_arc_length(self) -> np.ndarray:
+        """
+        Approximates the arc-length of the curve by summing the arc-lengths of each segment of the evaluated
+        polyline
+
+        .. note::
+
+            This method will raise an exception if ``t`` is a :obj:`float`
+
+        Returns
+        -------
+        np.ndarray
+            1-D array with :math:`(\text{len}(t) - 1)` elements
+        """
+        if isinstance(self.t, float):
+            raise ValueError(f"Arc-length calculation is only available for array-type curve data")
         return np.sum(np.sqrt(
-            (self.xyz[1:, 0] - self.xyz[:-1, 0]) ** 2,
-            (self.xyz[1:, 1] - self.xyz[:-1, 1]) ** 2,
-            (self.xyz[1:, 2] - self.xyz[:-1, 2]) ** 2
+            (self.x[1:] - self.x[:-1]) ** 2,
+            (self.y[1:] - self.y[:-1]) ** 2,
+            (self.z[1:] - self.z[:-1]) ** 2
         ))
 
 
@@ -132,11 +398,27 @@ class PCurve3D(Geometry3D):
         pass
 
     @abstractmethod
-    def evaluate_single_t(self, t: float) -> np.ndarray:
+    def evaluate(self, t: float or int or np.ndarray = None) -> np.ndarray:
         pass
 
     @abstractmethod
-    def evaluate(self, t: np.ndarray = None) -> PCurveData3D:
+    def evaluate_grid(self, nt: int = 100) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def evaluate_tvec(self, t: np.ndarray) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def dcdt(self, t: float) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def d2cdt2(self, t: float) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def evaluate_pcurvedata(self, t: np.ndarray = None, nt: int = None) -> PCurveData3D:
         pass
 
 
@@ -195,6 +477,19 @@ class Line2D(PCurve2D):
         self.control_points = [self.p0, self.p1]
 
     def evaluate_point2d(self, t: float) -> Point2D:
+        r"""
+        Evaluates the line at a single :math:`(u,v)` parameter pair and returns a point object.
+
+        Parameters
+        ----------
+        t: float
+            Position along :math:`t` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        Point2D
+            Evaluated point
+        """
         if self.theta:
             return Point2D(
                 x=self.p0.x + self.d * np.cos(self.theta.rad) * t,
@@ -203,12 +498,77 @@ class Line2D(PCurve2D):
         else:
             return self.p0 + t * (self.p1 - self.p0)
 
-    def evaluate_single_t(self, t: float) -> np.ndarray:
+    def evaluate(self, t: float) -> np.ndarray:
+        r"""
+        Evaluates the line at a given :math:`t`-value.
+
+        Parameters
+        ----------
+        t: float
+            Position along :math:`t` in parametric space. Normally in the range :math:`[0,1]`
+
+        Returns
+        -------
+        numpy.ndarray
+            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
+        """
         return self.evaluate_point2d(t).as_array()
 
-    def evaluate(self, t: np.ndarray = None) -> PCurveData2D:
-        t = np.linspace(0.0, 1.0, 10) if t is None else t
+    def evaluate_grid(self, nt: int = 100) -> np.ndarray:
+        """
+        Evaluates the line at :math:`N_t` points
 
+        Parameters
+        ----------
+        nt: int
+            Number of evenly-spaced :math:`t`-values at which to evaluate
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`N_t \times 2`
+        """
+        t = np.linspace(0.0, 1.0, nt)
+
+        if self.theta:
+            x = self.p0.x.m + self.d.m * np.cos(self.theta.rad) * t
+            y = self.p0.y.m + self.d.m * np.sin(self.theta.rad) * t
+        else:
+            x = self.p0.x.m + t * (self.p1.x.m - self.p0.x.m)
+            y = self.p0.y.m + t * (self.p1.y.m - self.p0.y.m)
+
+        return np.column_stack((x, y))
+
+    def evaluate_tvec(self, t: np.ndarray) -> np.ndarray:
+        """
+        Evaluates the line at an arbitrary vector of :math:`t`-values
+
+        Parameters
+        ----------
+        t: np.ndarray
+            1-D array of :math:`t`-values
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`\text{len}(t) \times 2`
+        """
+        if self.theta:
+            x = self.p0.x.m + self.d.m * np.cos(self.theta.rad) * t
+            y = self.p0.y.m + self.d.m * np.sin(self.theta.rad) * t
+        else:
+            x = self.p0.x.m + t * (self.p1.x.m - self.p0.x.m)
+            y = self.p0.y.m + t * (self.p1.y.m - self.p0.y.m)
+
+        return np.column_stack((x, y))
+
+    def dcdt(self, t: float) -> np.ndarray:
+        pass
+
+    def d2cdt2(self, t: float) -> np.ndarray:
+        pass
+
+    def evaluate_pcurvedata(self, t: np.ndarray = None, nt: int = None) -> PCurveData2D:
         if self.theta:
             x = self.p0.x.m + self.d.m * np.cos(self.theta.rad) * t
             y = self.p0.y.m + self.d.m * np.sin(self.theta.rad) * t
@@ -348,10 +708,10 @@ class CircularArc2D(PCurve2D):
             y=self.center.y + self.radius * np.sin(self._map_t_to_angle(t)),
         )
 
-    def evaluate_single_t(self, t: float) -> np.ndarray:
+    def evaluate(self, t: float) -> np.ndarray:
         return self.evaluate_point2d(t).as_array()
 
-    def evaluate(self, t: np.ndarray = None) -> PCurveData2D:
+    def evaluate_grid(self, t: np.ndarray = None) -> PCurveData2D:
         t = np.linspace(0.0, 1.0, 100) if t is None else t
         angle_range = self.end_angle.rad - self.start_angle.rad
         x = self.center.x.m + self.radius.m * np.cos(self._map_t_to_angle(t))
@@ -458,10 +818,10 @@ class Bezier2D(PCurve2D):
 
         return Point2D(x=Length(m=x), y=Length(m=y))
 
-    def evaluate_single_t(self, t: float) -> np.ndarray:
+    def evaluate(self, t: float) -> np.ndarray:
         return self.evaluate_point2d(t).as_array()
 
-    def evaluate(self, t: np.array or None = None) -> PCurveData2D:
+    def evaluate_grid(self, t: np.array or None = None) -> PCurveData2D:
         r"""
         Evaluates the curve using an optionally specified parameter vector.
 

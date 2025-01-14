@@ -73,7 +73,7 @@ def find_t_corresponding_to_minimum_distance_to_point2d(curve: PCurve2D, point: 
     point = point.as_array() if isinstance(point, Point2D) else point
 
     def minimize_func(t):
-        curve_point = curve.evaluate_single_t(t)
+        curve_point = curve.evaluate(t)
         return (curve_point[0] - point[0]) ** 2 + (curve_point[1] - point[1]) ** 2
 
     res = minimize_scalar(minimize_func, bounds=[0.0, 1.0])
@@ -86,7 +86,7 @@ def find_t_corresponding_to_minimum_distance_to_point3d(curve: PCurve3D, point: 
     point = point.as_array() if isinstance(point, Point3D) else point
 
     def minimize_func(t):
-        curve_point = curve.evaluate_single_t(t)
+        curve_point = curve.evaluate(t)
         return (curve_point[0] - point[0]) ** 2 + (curve_point[1] - point[1]) ** 2 + (curve_point[2] - point[2]) ** 2
 
     res = minimize_scalar(minimize_func, bounds=[0.0, 1.0])
