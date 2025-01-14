@@ -461,7 +461,6 @@ class BezierSurface(Surface):
         # evaluated at "n_points" locations along the boundary
         self_perp_edge_derivs = self.get_second_derivs_along_edge(surface_edge, n_points=n_points, perp=True)
         other_perp_edge_derivs = other.get_second_derivs_along_edge(other_surface_edge, n_points=n_points, perp=True)
-
         # Initialize an array of ratios of magnitude of the derivative values at each point for both sides
         # of the boundary
         magnitude_ratios = []
@@ -1683,6 +1682,7 @@ class RationalBezierSurface(Surface):
         # evaluated at "n_points" locations along the boundary
         self_perp_edge_derivs = self.get_second_derivs_along_edge(surface_edge, n_points=n_points, perp=True)
         other_perp_edge_derivs = other.get_second_derivs_along_edge(other_surface_edge, n_points=n_points, perp=True)
+        #print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
         self_perp_edge_derivs[np.absolute(self_perp_edge_derivs) < 1e-6] = 0.0
         other_perp_edge_derivs[np.absolute(other_perp_edge_derivs) < 1e-6] = 0.0
 
@@ -2139,6 +2139,66 @@ class NURBSSurface(Surface):
             return NURBSCurve3D(P[:, -1, :], w[:, -1], self.knots_u, self.degree_u)
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
+    
+    def is_clamped(self,surface_edge:SurfaceEdge):
+        Edge=self.extract_edge_curve(surface_edge)
+        p=Edge.degree
+        knot=Edge.knot_vector
+        assert (knot[:(p+1)]==0 and knot[-(p+1):]==1)
+    
+    @staticmethod
+    def _cast_uv(u: float or np.ndarray, v: float or np.ndarray) -> (float, float) or (np.ndarray, np.ndarray):
+        if not isinstance(u, np.ndarray):
+            u = np.array([u])
+        if not isinstance(v, np.ndarray):
+            v = np.array([v])
+    
+    def dSdu(self, u: float or np.ndarray, v: float or np.ndarray):
+        # control_points=self.control_points,
+        #     knots_u=self.knots_u,
+        #     knots_v=self.knots_v,
+        #     weights=self.weights,
+        #     degree_u=self.degree_u,
+        #     degree_v=self.degree_v
+
+        #  _cox_de_boor(self, t: float, i: int, p: int, knot_vector: np.ndarray,
+        #              possible_spans_u_or_v: np.ndarray, possible_span_indices_u_or_v: np.ndarray) -> float:
+        # def _get_possible_spans(knot_vector) -> (np.ndarray, np.ndarray):
+    
+        n, m = self.degree_u, self.degree_v
+    
+        P = self.control_points
+        u, v = self._cast_uv(u, v)
+        possible_spans_u,possible_span_indices_u=self._get_possible_spans(self.knots_u)
+        possible_spans_v,possible_span_indices_v=self._get_possible_spans(self.knots_v)
+        if isinstance(u, np.ndarray):
+            assert u.shape == v.shape
+        
+
+        weight_arr = np.array([[self._cox_de_boor(u,i,n,possible_spans_u,possible_span_indices_u) * self._cox_de_boor(v, j, m, possible_spans_v,possible_span_indices_v) * self.weights[i, j]
+                                for j in range(m + 1)] for i in range(n + 1)])
+        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
+
+        point_arr = np.array([[np.array([(self._cox_de_boor(u,i,n,possible_spans_u,possible_span_indices_u) * self._cox_de_boor(v, j, m, possible_spans_v,possible_span_indices_v) *
+                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
+                               for j in range(m + 1)] for i in range(n + 1)])
+        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
+
+        point_arr_deriv = np.array([[np.array([(((1/(self.knots_u[i+n]-self.knots_u[i]))*self._cox_de_boor(u,i,n-1,possible_spans_u,possible_span_indices_u) - (1/(self.knots_u[i+n+1]-self.knots_u[i+1]))*self._cox_de_boor(u,i+1,n-1,possible_spans_u,possible_span_indices_u)) *
+                                                self._cox_de_boor(v, j, m, possible_spans_v,possible_span_indices_v) * self.weights[i, j])]).T @
+                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
+        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
+
+        weight_arr_deriv = np.array([[ ((1/(self.knots_u[i+n]-self.knots_u[i]))*self._cox_de_boor(u,i,n-1,possible_spans_u,possible_span_indices_u) - (1/(self.knots_u[i+n+1]-self.knots_u[i+1]))*self._cox_de_boor(u,i+1,n-1,possible_spans_u,possible_span_indices_u)) *
+                                      self._cox_de_boor(v, j, m, possible_spans_v,possible_span_indices_v)* self.weights[i, j]
+                                      for j in range(m + 1)] for i in range(n + 1)])
+        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
+
+        A = n * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
+        B = n * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
+        W = np.tile(weight_sum ** 2, (3, 1)).T
+
+        return (A - B) / W
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
 
