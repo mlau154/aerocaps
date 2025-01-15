@@ -9,7 +9,7 @@ print(os.getcwd())
 #from aerocaps import DATA_DIR
 from aerocaps.geom.point import Point3D
 from aerocaps.geom.surfaces import NURBSSurface, BezierSurface, RationalBezierSurface, SurfaceEdge
-from aerocaps.geom.curves import Bezier3D,Line3D
+from aerocaps.geom.curves import BezierCurve3D,Line3D
 from aerocaps.geom import NegativeWeightError
 from aerocaps.units.angle import Angle
 from aerocaps.iges.iges_generator import IGESGenerator
@@ -26,7 +26,7 @@ def test_nurbs_revolve():
         [0.0, -1.3, 1.0],
         [0.0, -0.8, 1.5]
     ])
-    bezier = Bezier3D([Point3D.from_array(p) for p in cubic_bezier_cps])
+    bezier = BezierCurve3D([Point3D.from_array(p) for p in cubic_bezier_cps])
     nurbs_surface = NURBSSurface.from_bezier_revolve(bezier, axis, Angle(deg=15.0), Angle(deg=130.0))
 
     iges_entities = [nurbs_surface.to_iges()]

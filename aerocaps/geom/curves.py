@@ -9,6 +9,7 @@ import numpy as np
 import pyvista as pv
 from matplotlib import pyplot as plt
 from scipy.optimize import fsolve
+from rust_nurbs import *
 
 import aerocaps.iges
 import aerocaps.iges.curves
@@ -19,7 +20,6 @@ from aerocaps.geom.transformation import Transformation2D, Transformation3D
 from aerocaps.geom.vector import Vector3D, Vector2D
 from aerocaps.units.angle import Angle
 from aerocaps.units.length import Length
-from aerocaps.utils.math import bernstein_poly
 
 __all__ = [
     "PCurveData2D",
@@ -29,9 +29,9 @@ __all__ = [
     "Line2D",
     "Line3D",
     "CircularArc2D",
-    "Bezier2D",
-    "Bezier3D",
-    "BSpline3D",
+    "BezierCurve2D",
+    "BezierCurve3D",
+    "BSplineCurve3D",
     "RationalBezierCurve3D",
     "NURBSCurve3D",
     "CompositeCurve3D",
@@ -46,6 +46,7 @@ _projection_dict = {
 
 
 class PCurveData2D:
+    """Data-processing class for 2-D parametric curves"""
     def __init__(self,
                  t: float or np.ndarray,
                  x: float or np.ndarray,
@@ -56,29 +57,29 @@ class PCurveData2D:
                  ypp: float or np.ndarray,
                  k: float or np.ndarray = None,
                  R: float or np.ndarray = None):
-        """
+        r"""
         Data-processing class for 2-D parametric curves. Adds convenience methods for plotting, approximating
         arc length, and computing curvature combs.
 
         Parameters
         ----------
-        t: float or np.ndarray
+        t: float or numpy.ndarray
             :math:`t`-value or vector for the curve
-        x: float or np.ndarray
+        x: float or numpy.ndarray
             Value of the curve in the :math:`x`-direction
-        y: float or np.ndarray
+        y: float or numpy.ndarray
             Value of the curve in the :math:`y`-direction
-        xp: float or np.ndarray
+        xp: float or numpy.ndarray
             First derivative :math:`x`-component of the curve with respect to :math:`t`
-        yp: float or np.ndarray
+        yp: float or numpy.ndarray
             First derivative :math:`y`-component of the curve with respect to :math:`t`
-        xpp: float or np.ndarray
+        xpp: float or numpy.ndarray
             Second derivative :math:`x`-component of the curve with respect to :math:`t`
-        ypp: float or np.ndarray
+        ypp: float or numpy.ndarray
             Second derivative :math:`y`-component of the curve with respect to :math:`t`
-        k: float or np.ndarray
+        k: float or v.ndarray
             Curvature of the curve. If not specified, it will be computed. Default: ``None``
-        R: float or np.ndarray
+        R: float or numpy.ndarray
             Radius of curvature of the curve. If not specified, it will be computed. Default: ``None``
         """
         self.t = t
@@ -94,7 +95,7 @@ class PCurveData2D:
             self.R_abs_min = np.min(np.abs(self.R))
 
     def _compute_curvature(self) -> float or np.ndarray:
-        """
+        r"""
         Computes the curvature from the first and second derivatives
 
         Returns
@@ -108,7 +109,7 @@ class PCurveData2D:
             return A / B
 
     def plot(self, ax: plt.Axes, **kwargs):
-        """
+        r"""
         Plots the curve on a :obj:`matplotlib.pyplot.Axes`
 
         .. note::
@@ -129,7 +130,7 @@ class PCurveData2D:
             ax.plot(self.x, self.y, **kwargs)
 
     def get_curvature_comb(self, max_comb_length: float, interval: int = 1) -> (np.ndarray, np.ndarray):
-        """
+        r"""
         Gets the curvature comb for the curve
 
         .. note::
@@ -169,7 +170,7 @@ class PCurveData2D:
         return comb_tails, comb_heads
 
     def approximate_arc_length(self) -> np.ndarray:
-        """
+        r"""
         Approximates the arc-length of the curve by summing the arc-lengths of each segment of the evaluated
         polyline
 
@@ -179,7 +180,7 @@ class PCurveData2D:
 
         Returns
         -------
-        np.ndarray
+        numpy.ndarray
             1-D array with :math:`(\text{len}(t) - 1)` elements
         """
         if isinstance(self.t, float):
@@ -188,36 +189,140 @@ class PCurveData2D:
 
 
 class PCurve2D(Geometry2D):
+    """Two-dimensional abstract parametric curve class"""
     @abstractmethod
-    def evaluate_point2d(self, t: float) -> Point2D:
+    def evaluate_point2d(self, t: float or int or np.ndarray) -> Point2D or typing.List[Point2D]:
+        r"""
+        Evaluates the line at one or more :math:`t`-values and returns a single point object or list of point objects
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        Point2D or typing.List[Point2D]
+            If ``t`` is a :obj:`float`, the output is a single point object. Otherwise, the output is a list of
+            point objects
+        """
         pass
 
     @abstractmethod
-    def evaluate(self, t: float) -> np.ndarray:
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
+        r"""
+        Evaluates the line at one or more :math:`t`-values
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        numpy.ndarray
+            If ``t`` is a :obj:`float`, the output is a 1-D array with two elements: the values of :math:`x` and
+            :math:`y`. Otherwise, the output is an array of size :math:`\text{len}(t) \times 2`
+        """
         pass
 
     @abstractmethod
-    def evaluate_grid(self, nt: int = 100) -> PCurveData2D:
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        r"""
+        Evaluates the first derivative of the curve with respect to :math:`t`
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        numpy.ndarray
+            If :math:`t` is a :obj:`float`, the output is a 1-D array containing two elements: the :math:`x`-
+            and :math:`y`-components of the first derivative. Otherwise, the output is a 2-D array of size
+            :math:`\text{len}(t) \times 2`
+        """
         pass
 
     @abstractmethod
-    def evaluate_tvec(self, t: np.ndarray) -> np.ndarray:
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        r"""
+        Evaluates the second derivative of the curve with respect to :math:`t`
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        numpy.ndarray
+            If :math:`t` is a :obj:`float`, the output is a 1-D array containing two elements: the :math:`x`-
+            and :math:`y`-components of the second derivative. Otherwise, the output is a 2-D array of size
+            :math:`\text{len}(t) \times 2`
+        """
         pass
 
     @abstractmethod
-    def dcdt(self, t: float) -> np.ndarray:
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData2D:
+        r"""
+        Evaluates a verbose set of parametric curve data as a class based on an input parameter value or vector
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        PCurveData2D
+            Parametric curve information, including derivative and curvature data
+        """
         pass
 
-    @abstractmethod
-    def d2cdt2(self, t: float) -> np.ndarray:
-        pass
+    @staticmethod
+    def _get_linear_tvec(nt: int) -> np.ndarray:
+        r"""
+        Gets a linear vector of parameter values based on a number of points
 
-    @abstractmethod
-    def evaluate_pcurvedata(self, t: np.ndarray = None, nt: int = None) -> PCurveData2D:
-        pass
+        Parameters
+        ----------
+        nt: int
+            Number of linearly-spaced :math:`t`-values to generate
+        """
+        return np.linspace(0.0, 1.0, nt)
+
+    @staticmethod
+    def _validate_and_convert_t(t: float or int or np.ndarray) -> float or np.ndarray:
+        r"""
+        Validates the :math:`t`-value and converts it to an array if necessary
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        float or numpy.ndarray
+            Either a single :math:`t`-value or a 1-D array of :math:`t`-values, depending on the input type
+        """
+        if isinstance(t, int) and t < 2:
+            raise ValueError(f"If `t` is an integer, a value of at least 2 must be specified. If you are intending to "
+                             f"evaluate the curve at t=0 or t=1, please use the float format for these numbers "
+                             f"(0.0 or 1.0)")
+        return np.linspace(0.0, 1.0, t) if isinstance(t, int) else t
 
 
 class PCurveData3D:
+    """Data-processing class for 3-D parametric curves"""
     def __init__(self,
                  t: float or np.ndarray,
                  x: float or np.ndarray,
@@ -231,35 +336,35 @@ class PCurveData3D:
                  zpp: float or np.ndarray,
                  k: float or np.ndarray = None,
                  R: float or np.ndarray = None):
-        """
+        r"""
         Data-processing class for 3-D parametric curves. Adds convenience methods for plotting, approximating
         arc length, and computing curvature combs.
 
         Parameters
         ----------
-        t: float or np.ndarray
+        t: float or numpy.ndarray
             :math:`t`-value or vector for the curve
-        x: float or np.ndarray
+        x: float or numpy.ndarray
             Value of the curve in the :math:`x`-direction
-        y: float or np.ndarray
+        y: float or numpy.ndarray
             Value of the curve in the :math:`y`-direction
-        z: float or np.ndarray
+        z: float or numpy.ndarray
             Value of the curve in the :math:`x`-direction
-        xp: float or np.ndarray
+        xp: float or numpy.ndarray
             First derivative :math:`x`-component of the curve with respect to :math:`t`
-        yp: float or np.ndarray
+        yp: float or numpy.ndarray
             First derivative :math:`y`-component of the curve with respect to :math:`t`
-        zp: float or np.ndarray
+        zp: float or numpy.ndarray
             First derivative :math:`z`-component of the curve with respect to :math:`t`
-        xpp: float or np.ndarray
+        xpp: float or numpy.ndarray
             Second derivative :math:`x`-component of the curve with respect to :math:`t`
-        ypp: float or np.ndarray
+        ypp: float or numpy.ndarray
             Second derivative :math:`y`-component of the curve with respect to :math:`t`
-        zpp: float or np.ndarray
+        zpp: float or numpy.ndarray
             Second derivative :math:`z`-component of the curve with respect to :math:`t`
-        k: float or np.ndarray
+        k: float or numpy.ndarray
             Curvature of the curve. If not specified, it will be computed. Default: ``None``
-        R: float or np.ndarray
+        R: float or numpy.ndarray
             Radius of curvature of the curve. If not specified, it will be computed. Default: ``None``
         """
         self.t = t
@@ -278,12 +383,12 @@ class PCurveData3D:
             self.R_abs_min = np.min(np.abs(self.R))
 
     def _compute_curvature(self) -> float or np.ndarray:
-        """
+        r"""
         Computes the curvature from the first and second derivatives
 
         Returns
         -------
-        float or np.ndarray
+        float or numpy.ndarray
             Same output type/shape as ``t``
         """
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -294,7 +399,7 @@ class PCurveData3D:
             return np.sqrt(A ** 2 + B ** 2 + C ** 2) / D
 
     def plot(self, ax: plt.Axes, **kwargs):
-        """
+        r"""
         Plots the curve on an :obj:`matplotlib.pyplot.Axes`
 
         .. note::
@@ -312,7 +417,7 @@ class PCurveData3D:
         ax.plot3D(self.x, self.y, self.z, **kwargs)
 
     def get_curvature_comb(self, max_comb_length: float, interval: int = 1):
-        """
+        r"""
         Gets the curvature comb for the curve
 
         .. note::
@@ -370,7 +475,7 @@ class PCurveData3D:
         return comb_tails, comb_heads
 
     def approximate_arc_length(self) -> np.ndarray:
-        """
+        r"""
         Approximates the arc-length of the curve by summing the arc-lengths of each segment of the evaluated
         polyline
 
@@ -380,7 +485,7 @@ class PCurveData3D:
 
         Returns
         -------
-        np.ndarray
+        numpy.ndarray
             1-D array with :math:`(\text{len}(t) - 1)` elements
         """
         if isinstance(self.t, float):
@@ -393,33 +498,135 @@ class PCurveData3D:
 
 
 class PCurve3D(Geometry3D):
+    """Three-dimensional abstract parametric curve class"""
     @abstractmethod
-    def evaluate_point3d(self, t: float) -> Point3D:
+    def evaluate_point3d(self, t: float or int or np.ndarray) -> Point3D or typing.List[Point3D]:
+        r"""
+        Evaluates the line at one or more :math:`t`-values and returns a single point object or list of point objects
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        Point3D or typing.List[Point3D]
+            If ``t`` is a :obj:`float`, the output is a single point object. Otherwise, the output is a list of
+            point objects
+        """
         pass
 
     @abstractmethod
-    def evaluate(self, t: float or int or np.ndarray = None) -> np.ndarray:
+    def evaluate(self, t: float or int or np.ndarray) -> float or np.ndarray:
+        r"""
+        Evaluates the line at one or more :math:`t`-values
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        numpy.ndarray
+            If ``t`` is a :obj:`float`, the output is a 1-D array with three elements: the values of :math:`x`,
+            :math:`y`, and :math:`x`. Otherwise, the output is an array of size :math:`\text{len}(t) \times 3`
+        """
         pass
 
     @abstractmethod
-    def evaluate_grid(self, nt: int = 100) -> np.ndarray:
+    def dcdt(self, t: float or int or np.ndarray) -> float or np.ndarray:
+        r"""
+        Evaluates the first derivative of the curve with respect to :math:`t`
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        numpy.ndarray
+            If :math:`t` is a :obj:`float`, the output is a 1-D array containing two elements: the :math:`x`-
+            :math:`y`, and :math:`z`-components of the first derivative. Otherwise, the output is a 2-D array of size
+            :math:`\text{len}(t) \times 3`
+        """
         pass
 
     @abstractmethod
-    def evaluate_tvec(self, t: np.ndarray) -> np.ndarray:
+    def d2cdt2(self, t: float or int or np.ndarray) -> float or np.ndarray:
+        r"""
+        Evaluates the second derivative of the curve with respect to :math:`t`
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        numpy.ndarray
+            If :math:`t` is a :obj:`float`, the output is a 1-D array containing three elements: the :math:`x`-
+            :math:`y`-, and :math:`z`-components of the second derivative. Otherwise, the output is a 2-D array of size
+            :math:`\text{len}(t) \times 3`
+        """
         pass
 
     @abstractmethod
-    def dcdt(self, t: float) -> np.ndarray:
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData3D:
+        r"""
+        Evaluates a verbose set of parametric curve data as a class based on an input parameter value or vector
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        PCurveData3D
+            Parametric curve information, including derivative and curvature data
+        """
         pass
 
-    @abstractmethod
-    def d2cdt2(self, t: float) -> np.ndarray:
-        pass
+    @staticmethod
+    def _get_linear_tvec(nt: int) -> np.ndarray:
+        """
+        Gets a linear vector of parameter values based on a number of points
 
-    @abstractmethod
-    def evaluate_pcurvedata(self, t: np.ndarray = None, nt: int = None) -> PCurveData3D:
-        pass
+        Parameters
+        ----------
+        nt: int
+            Number of linearly-spaced :math:`t`-values to generate
+        """
+        return np.linspace(0.0, 1.0, nt)
+
+    @staticmethod
+    def _validate_and_convert_t(t: float or int or np.ndarray) -> float or np.ndarray:
+        """
+
+        Parameters
+        ----------
+        t: float or int or numpy.ndarray
+            Either a single :math:`t`-value, a number of evenly spaced :math:`t`-values between 0 and 1, or
+            a 1-D array of :math:`t`-values
+
+        Returns
+        -------
+        float or numpy.ndarray
+            Either a single :math:`t`-value or a 1-D array of :math:`t`-values, depending on the input type
+        """
+        if isinstance(t, int) and t < 2:
+            raise ValueError(f"If `t` is an integer, a value of at least 2 must be specified. If you are intending to "
+                             f"evaluate the curve at t=0 or t=1, please use the float format for these numbers "
+                             f"(0.0 or 1.0)")
+        return np.linspace(0.0, 1.0, t) if isinstance(t, int) else t
 
 
 class Line2D(PCurve2D):
@@ -476,59 +683,8 @@ class Line2D(PCurve2D):
         self.p1 = self.evaluate_point2d(1.0) if not p1 else p1
         self.control_points = [self.p0, self.p1]
 
-    def evaluate_point2d(self, t: float) -> Point2D:
-        r"""
-        Evaluates the line at a single :math:`(u,v)` parameter pair and returns a point object.
-
-        Parameters
-        ----------
-        t: float
-            Position along :math:`t` in parametric space. Normally in the range :math:`[0,1]`
-
-        Returns
-        -------
-        Point2D
-            Evaluated point
-        """
-        if self.theta:
-            return Point2D(
-                x=self.p0.x + self.d * np.cos(self.theta.rad) * t,
-                y=self.p0.y + self.d * np.sin(self.theta.rad) * t
-            )
-        else:
-            return self.p0 + t * (self.p1 - self.p0)
-
-    def evaluate(self, t: float) -> np.ndarray:
-        r"""
-        Evaluates the line at a given :math:`t`-value.
-
-        Parameters
-        ----------
-        t: float
-            Position along :math:`t` in parametric space. Normally in the range :math:`[0,1]`
-
-        Returns
-        -------
-        numpy.ndarray
-            1-D array of the form ``array([x, y, z])`` representing the evaluated point on the surface
-        """
-        return self.evaluate_point2d(t).as_array()
-
-    def evaluate_grid(self, nt: int = 100) -> np.ndarray:
-        """
-        Evaluates the line at :math:`N_t` points
-
-        Parameters
-        ----------
-        nt: int
-            Number of evenly-spaced :math:`t`-values at which to evaluate
-
-        Returns
-        -------
-        numpy.ndarray
-            Array of size :math:`N_t \times 2`
-        """
-        t = np.linspace(0.0, 1.0, nt)
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
+        t = self._validate_and_convert_t(t)
 
         if self.theta:
             x = self.p0.x.m + self.d.m * np.cos(self.theta.rad) * t
@@ -537,62 +693,79 @@ class Line2D(PCurve2D):
             x = self.p0.x.m + t * (self.p1.x.m - self.p0.x.m)
             y = self.p0.y.m + t * (self.p1.y.m - self.p0.y.m)
 
-        return np.column_stack((x, y))
+        return np.column_stack((x, y)) if isinstance(t, np.ndarray) else np.array([x, y])
 
-    def evaluate_tvec(self, t: np.ndarray) -> np.ndarray:
-        """
-        Evaluates the line at an arbitrary vector of :math:`t`-values
+    def evaluate_point2d(self, t: float or int or np.ndarray) -> Point2D or typing.List[Point2D]:
+        t = self._validate_and_convert_t(t)
+        curve = self.evaluate(t)
+        if curve.ndim == 1:
+            return Point2D.from_array(curve)
+        return [Point2D.from_array(curve_point) for curve_point in curve]
 
-        Parameters
-        ----------
-        t: np.ndarray
-            1-D array of :math:`t`-values
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        t = self._validate_and_convert_t(t)
+        if isinstance(t, float):
+            if self.theta:
+                return self.d.m * np.array([np.cos(self.theta.rad), np.sin(self.theta.rad)])
+            return (self.p1 - self.p0).as_array()
+        if self.theta:
+            return self.d.m * np.repeat(
+                np.array([np.cos(self.theta.rad), np.sin(self.theta.rad)])[np.newaxis, :], t.shape[0], axis=0)
+        return np.repeat((self.p1 - self.p0).as_array()[np.newaxis, :], t.shape[0], axis=0)
 
-        Returns
-        -------
-        numpy.ndarray
-            Array of size :math:`\text{len}(t) \times 2`
-        """
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        t = self._validate_and_convert_t(t)
+        if isinstance(t, float):
+            return np.zeros(2)
+        return np.zeros((t.shape[0], 2))
+
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData2D:
+        t = self._validate_and_convert_t(t)
+        zeros = np.zeros(t.shape) if isinstance(t, np.ndarray) else 0.0
+        ones = np.ones(t.shape) if isinstance(t, np.ndarray) else 1.0
         if self.theta:
             x = self.p0.x.m + self.d.m * np.cos(self.theta.rad) * t
             y = self.p0.y.m + self.d.m * np.sin(self.theta.rad) * t
+            xp = self.d.m * np.cos(self.theta.rad) * ones
+            yp = self.d.m * np.sin(self.theta.rad) * ones
         else:
             x = self.p0.x.m + t * (self.p1.x.m - self.p0.x.m)
             y = self.p0.y.m + t * (self.p1.y.m - self.p0.y.m)
+            xp = (self.p1.x.m - self.p0.x.m) * ones
+            yp = (self.p1.y.m - self.p0.y.m) * ones
 
-        return np.column_stack((x, y))
-
-    def dcdt(self, t: float) -> np.ndarray:
-        pass
-
-    def d2cdt2(self, t: float) -> np.ndarray:
-        pass
-
-    def evaluate_pcurvedata(self, t: np.ndarray = None, nt: int = None) -> PCurveData2D:
-        if self.theta:
-            x = self.p0.x.m + self.d.m * np.cos(self.theta.rad) * t
-            y = self.p0.y.m + self.d.m * np.sin(self.theta.rad) * t
-            xp = self.d.m * np.cos(self.theta.rad) * np.ones(t.shape)
-            yp = self.d.m * np.sin(self.theta.rad) * np.ones(t.shape)
-        else:
-            x = self.p0.x.m + t * (self.p1.x.m - self.p0.x.m)
-            y = self.p0.y.m + t * (self.p1.y.m - self.p0.y.m)
-            xp = (self.p1.x.m - self.p0.x.m) * np.ones(t.shape)
-            yp = (self.p1.y.m - self.p0.y.m) * np.ones(t.shape)
-
-        xy = np.column_stack((x, y))
-        xpyp = np.column_stack((xp, yp))
-        xppypp = np.zeros((len(t), 2))
-        R = np.inf * np.ones(t.shape)
-        k = np.zeros(t.shape)
-        return PCurveData2D(t=t, xy=xy, xpyp=xpyp, xppypp=xppypp, k=k, R=R)
+        xpp = zeros
+        ypp = zeros
+        R = np.inf * ones
+        k = zeros
+        return PCurveData2D(t=t, x=x, y=y, xp=xp, yp=yp, xpp=xpp, ypp=ypp, k=k, R=R)
 
     def get_vector(self) -> Vector2D:
+        r"""
+        Gets a vector object determined by the starting and ending points of the line
+
+        Returns
+        -------
+        Vector2D
+            Vector object
+        """
         return Vector2D(p0=self.p0, p1=self.p1)
 
-    def plot(self, plot: pv.Plotter, **line_kwargs):
-        line_arr = np.array([self.p0.as_array(), self.p1.as_array()])
-        plot.add_lines(line_arr, **line_kwargs)
+    def plot(self, ax: plt.Axes, nt: int = 10, **kwargs):
+        r"""
+        Plots the line on a :obj:`matplotlib.pyplot.Axes`
+
+        Parameters
+        ----------
+        ax: plt.Axes
+            Axis on which to plot the line
+        nt: int
+            Number of points along the line to output to the plot. Default: ``10``
+        kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot`
+        """
+        xy = self.evaluate(nt)
+        ax.plot(xy[:, 0], xy[:, 1], **kwargs)
 
 
 class Line3D(PCurve3D):
@@ -621,71 +794,198 @@ class Line3D(PCurve3D):
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.curves.LineIGES(self.p0.as_array(), self.p1.as_array())
 
-    def from_iges(self):
-        pass
-
     def get_control_point_array(self, unit: str = "m") -> np.ndarray:
+        r"""
+        Gets an array representation of the two points defining the line. Used for compatibility with
+        NURBS curve methods.
+
+        Parameters
+        ----------
+        unit: str
+            Physical length units used to create the array from the point objects
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`2 \times 3`
+        """
         return np.array([p.as_array(unit=unit) for p in self.control_points])
 
     def reverse(self) -> "Line3D":
+        """
+        Creates a copy of the line with the parametric direction reversed
+
+        Returns
+        -------
+        Line3D
+            Reversed line
+        """
         return self.__class__(p0=self.p1, p1=self.p0)
 
-    def projection_on_principal_plane(self, plane: str = "XY") -> Line2D:
+    def project_onto_principal_plane(self, plane: str = "XY") -> Line2D:
+        r"""
+        Projects the line onto a principal plane
+
+        Parameters
+        ----------
+        plane: str
+            Plane on which to project the line. Either 'XY', 'YZ', or 'XZ'
+
+        Returns
+        -------
+        Line2D
+            Projected line
+        """
         return Line2D(p0=self.p0.projection_on_principal_plane(plane), p1=self.p1.projection_on_principal_plane(plane))
 
-    def evaluate_point3d(self, t: float) -> Point3D:
-        if self.phi and self.theta:
-            return Point3D(
-                x=self.p0.x + self.d * np.cos(self.phi.rad) * np.cos(self.theta.rad) * t,
-                y=self.p0.y + self.d * np.cos(self.phi.rad) * np.sin(self.theta.rad) * t,
-                z=self.p0.z + self.d * np.sin(self.phi.rad) * t
-            )
-        else:
-            return self.p0 + t * (self.p1 - self.p0)
-
-    def evaluate_single_t(self, t: float) -> np.ndarray:
-        return self.evaluate_point3d(t).as_array()
-
-    def evaluate(self, t: np.ndarray = None) -> PCurveData3D:
-        t = np.linspace(0.0, 1.0, 10) if t is None else t
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
+        t = self._validate_and_convert_t(t)
 
         if self.theta:
             x = self.p0.x + self.d * np.cos(self.phi.rad) * np.cos(self.theta.rad) * t,
             y = self.p0.y + self.d * np.cos(self.phi.rad) * np.sin(self.theta.rad) * t,
             z = self.p0.z + self.d * np.sin(self.phi.rad) * t
-            xp = self.d.m * np.cos(self.phi.rad) * np.cos(self.theta.rad) * np.ones(t.shape)
-            yp = self.d.m * np.cos(self.phi.rad) * np.sin(self.theta.rad) * np.ones(t.shape)
-            zp = self.d.m * np.sin(self.phi.rad) * np.ones(t.shape)
         else:
             x = self.p0.x.m + t * (self.p1.x.m - self.p0.x.m)
             y = self.p0.y.m + t * (self.p1.y.m - self.p0.y.m)
             z = self.p0.z.m + t * (self.p1.z.m - self.p0.z.m)
-            xp = (self.p1.x.m - self.p0.x.m) * np.ones(t.shape)
-            yp = (self.p1.y.m - self.p0.y.m) * np.ones(t.shape)
-            zp = (self.p1.z.m - self.p0.z.m) * np.ones(t.shape)
 
-        xyz = np.column_stack((x, y, z))
-        xpypzp = np.column_stack((xp, yp, zp))
-        xppyppzpp = np.zeros((len(t), 3))
-        R = np.inf * np.ones(t.shape)
-        k = np.zeros(t.shape)
-        return PCurveData3D(t=t, xyz=xyz, xpypzp=xpypzp, xppyppzpp=xppyppzpp, k=k, R=R)
+        return np.column_stack((x, y, z)) if isinstance(t, np.ndarray) else np.array([x, y, z])
+
+    def evaluate_point3d(self, t: float or int or np.ndarray) -> Point3D or typing.List[Point3D]:
+        t = self._validate_and_convert_t(t)
+
+        curve = self.evaluate(t)
+        if curve.ndim == 1:
+            return Point3D.from_array(curve)
+        return [Point3D.from_array(curve_point) for curve_point in curve]
+
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        t = self._validate_and_convert_t(t)
+        if isinstance(t, float):
+            if self.theta:
+                return self.d.m * np.array([
+                    np.cos(self.phi.rad) * np.cos(self.theta.rad),
+                    np.cos(self.phi.rad) * np.sin(self.theta.rad),
+                    np.sin(self.phi.rad)
+                ])
+            return (self.p1 - self.p0).as_array()
+        if self.theta:
+            return self.d.m * np.repeat(
+                np.array([
+                    np.cos(self.phi.rad) * np.cos(self.theta.rad),
+                    np.cos(self.phi.rad) * np.sin(self.theta.rad),
+                    np.sin(self.phi.rad)
+                ])[np.newaxis, :], t.shape[0], axis=0)
+        return np.repeat((self.p1 - self.p0).as_array()[np.newaxis, :], t.shape[0], axis=0)
+
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        t = self._validate_and_convert_t(t)
+        if isinstance(t, float):
+            return np.zeros(3)
+        return np.zeros((t.shape[0], 3))
+
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData3D:
+        t = self._validate_and_convert_t(t)
+        zeros = np.zeros(t.shape) if isinstance(t, np.ndarray) else 0.0
+        ones = np.ones(t.shape) if isinstance(t, np.ndarray) else 1.0
+
+        if self.theta:
+            x = self.p0.x + self.d * np.cos(self.phi.rad) * np.cos(self.theta.rad) * t,
+            y = self.p0.y + self.d * np.cos(self.phi.rad) * np.sin(self.theta.rad) * t,
+            z = self.p0.z + self.d * np.sin(self.phi.rad) * t
+            xp = self.d.m * np.cos(self.phi.rad) * np.cos(self.theta.rad) * ones
+            yp = self.d.m * np.cos(self.phi.rad) * np.sin(self.theta.rad) * ones
+            zp = self.d.m * np.sin(self.phi.rad) * ones
+        else:
+            x = self.p0.x.m + t * (self.p1.x.m - self.p0.x.m)
+            y = self.p0.y.m + t * (self.p1.y.m - self.p0.y.m)
+            z = self.p0.z.m + t * (self.p1.z.m - self.p0.z.m)
+            xp = (self.p1.x.m - self.p0.x.m) * ones
+            yp = (self.p1.y.m - self.p0.y.m) * ones
+            zp = (self.p1.z.m - self.p0.z.m) * ones
+
+        xpp = zeros
+        ypp = zeros
+        zpp = zeros
+        R = np.inf * ones
+        k = zeros
+        return PCurveData3D(t=t, x=x, y=y, z=z, xp=xp, yp=yp, zp=zp, xpp=xpp, ypp=ypp, zpp=zpp, k=k, R=R)
 
     def get_vector(self) -> Vector3D:
+        r"""
+        Gets a vector object determined by the starting and ending points of the line
+
+        Returns
+        -------
+        Vector3D
+            Vector object
+        """
         return Vector3D(p0=self.p0, p1=self.p1)
 
-    def plot(self, plot: pv.Plotter, **line_kwargs):
-        line_arr = np.array([self.p0.as_array(), self.p1.as_array()])
-        plot.add_lines(line_arr, **line_kwargs)
+    def plot(self, plot: pv.Plotter = None, ax: plt.Axes = None, nt: int = 10, **kwargs):
+        r"""
+        Plots the line on either a 3-D :obj:`matplotlib.pyplot.Axes`
+
+        Parameters
+        ----------
+        plot: pyvista.Plotter
+            3-D :obj:`pyvista` plotting window
+        ax: plt.Axes
+            Axis on which to plot the line
+        nt: int
+            Number of points along the line to output to the plot. Default: ``10``
+        kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot` or
+            :obj:`pyvista.Plotter.add_lines`
+        """
+        if not bool(plot) ^ bool(ax):
+            raise ValueError("Either `plot` or `ax` must be specified")
+        if plot:
+            line_arr = np.array([self.p0.as_array(), self.p1.as_array()])
+            plot.add_lines(line_arr, **kwargs)
+        if ax:
+            xy = self.evaluate(nt)
+            ax.plot(xy[:, 0], xy[:, 1], **kwargs)
 
 
 class CircularArc2D(PCurve2D):
+    """Two-dimensional circular arc class"""
     def __init__(self, center: Point2D, radius: Length, start_point: Point2D = None, end_point: Point2D = None,
                  start_angle: Angle = None, end_angle: Angle = None, complement: bool = False):
+        """
+        Creates a circular arc object.
+
+        .. note::
+
+            The center and radius must be specified, along with a combination of either ``start_point`` or
+            ``start_angle`` and ``end_point`` or ``end_angle``. The starting and ending points are only used
+            to determine the angle based on relationship to the center. These points do not override the value
+            specified by ``radius``
+
+        Parameters
+        ----------
+        center: Point2D
+            Center of the arc
+        radius: Length
+            Arc radius
+        start_point: Point2D
+            Optional starting point for the arc. Default: ``None``
+        end_point: Point2D
+            Optional ending point for the arc. Default: ``None``
+        start_angle: Angle
+            Optional starting angle for the arc. Default: ``None``
+        end_angle: Angle
+            Optional ending angle for the arc. Default: ``None``
+        complement: bool
+            Whether to output the complement arc. Default: ``False``
+        """
+        if not bool(start_point) ^ bool(start_angle):
+            raise ValueError("Must specify a starting point or angle")
+        if not bool(end_point) ^ bool(end_angle):
+            raise ValueError("Must specify an ennding point or angle")
         self.center = center
         self.radius = radius
-        self.start_point = start_point
-        self.end_point = end_point
         if start_angle is None:
             self.start_angle = Angle(rad=np.arctan2(start_point.y.m - center.y.m, start_point.x.m - center.x.m))
         else:
@@ -696,46 +996,109 @@ class CircularArc2D(PCurve2D):
             self.end_angle = end_angle
         self.complement = complement
 
-    def _map_t_to_angle(self, t):
+    def _map_t_to_angle(self, t: float or np.ndarray) -> float or np.ndarray:
+        r"""
+        Maps the :math:`t`-value to an angle along the circle
+
+        Parameters
+        ----------
+        t: float or numpy.ndarray
+            :math:`t`-value or array of :math:`t`-values to map
+
+        Returns
+        -------
+        float or numpy.ndarray
+            Mapped angles
+        """
         if self.complement:
             return self.start_angle.rad - (2 * np.pi - (self.end_angle.rad - self.start_angle.rad)) * t
         else:
             return (self.end_angle.rad - self.start_angle.rad) * t + self.start_angle.rad
 
-    def evaluate_point2d(self, t: float) -> Point2D:
-        return Point2D(
-            x=self.center.x + self.radius * np.cos(self._map_t_to_angle(t)),
-            y=self.center.y + self.radius * np.sin(self._map_t_to_angle(t)),
-        )
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
+        t = self._validate_and_convert_t(t)
 
-    def evaluate(self, t: float) -> np.ndarray:
-        return self.evaluate_point2d(t).as_array()
+        x = self.center.x.m + self.radius.m * np.cos(self._map_t_to_angle(t))
+        y = self.center.y.m + self.radius.m * np.sin(self._map_t_to_angle(t))
 
-    def evaluate_grid(self, t: np.ndarray = None) -> PCurveData2D:
-        t = np.linspace(0.0, 1.0, 100) if t is None else t
+        return np.column_stack((x, y)) if isinstance(t, np.ndarray) else np.array([x, y])
+
+    def evaluate_point2d(self, t: float or int or np.ndarray) -> Point2D or typing.List[Point2D]:
+        t = self._validate_and_convert_t(t)
+        curve = self.evaluate(t)
+        if curve.ndim == 1:
+            return Point2D.from_array(curve)
+        return [Point2D.from_array(curve_point) for curve_point in curve]
+
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        t = self._validate_and_convert_t(t)
         angle_range = self.end_angle.rad - self.start_angle.rad
+
+        xp = -self.radius.m * angle_range * np.sin(self._map_t_to_angle(t))
+        yp = self.radius.m * angle_range * np.cos(self._map_t_to_angle(t))
+        if isinstance(t, float):
+            return np.array([xp, yp])
+        return np.column_stack((xp, yp))
+
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        t = self._validate_and_convert_t(t)
+        angle_range = self.end_angle.rad - self.start_angle.rad
+
+        xpp = -self.radius.m * angle_range ** 2 * np.cos(self._map_t_to_angle(t))
+        ypp = -self.radius.m * angle_range ** 2 * np.sin(self._map_t_to_angle(t))
+        if isinstance(t, float):
+            return np.array([xpp, ypp])
+        return np.column_stack((xpp, ypp))
+
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData2D:
+        t = self._validate_and_convert_t(t)
+        ones = np.ones(t.shape) if isinstance(t, np.ndarray) else 1.0
+        angle_range = self.end_angle.rad - self.start_angle.rad
+
         x = self.center.x.m + self.radius.m * np.cos(self._map_t_to_angle(t))
         y = self.center.y.m + self.radius.m * np.sin(self._map_t_to_angle(t))
         xp = -self.radius.m * angle_range * np.sin(self._map_t_to_angle(t))
         yp = self.radius.m * angle_range * np.cos(self._map_t_to_angle(t))
         xpp = -self.radius.m * angle_range ** 2 * np.cos(self._map_t_to_angle(t))
         ypp = -self.radius.m * angle_range ** 2 * np.sin(self._map_t_to_angle(t))
-        xy = np.column_stack((x, y))
-        xpyp = np.column_stack((xp, yp))
-        xppypp = np.column_stack((xpp, ypp))
-        R = self.radius.m * np.ones(t.shape)
-        k = 1 / self.radius.m * np.ones(t.shape)
-        return PCurveData2D(t=t, xy=xy, xpyp=xpyp, xppypp=xppypp, k=k, R=R)
+        R = self.radius.m * ones
+        k = 1 / self.radius.m * ones
+        return PCurveData2D(t=t, x=x, y=y, xp=xp, yp=yp, xpp=xpp, ypp=ypp, k=k, R=R)
+
+    def plot(self, ax: plt.Axes, nt: int = 100, **kwargs):
+        r"""
+        Plots the line on a :obj:`matplotlib.pyplot.Axes`
+
+        Parameters
+        ----------
+        ax: plt.Axes
+            Axis on which to plot the arc
+        nt: int
+            Number of points along the arc to output to the plot. Default: ``100``
+        kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot`
+        """
+        xy = self.evaluate(nt)
+        ax.plot(xy[:, 0], xy[:, 1], **kwargs)
 
 
-class Bezier2D(PCurve2D):
+class BezierCurve2D(PCurve2D):
+    """Two-dimensional Bézier curve class"""
+    def __init__(self, control_points: typing.List[Point2D] or np.ndarray):
+        """
+        Creates a two-dimensional Bézier curve objects from a list of control points
 
-    def __init__(self, control_points: typing.List[Point2D]):
-        self.control_points = control_points
-        self.curve_connections = []
+        Parameters
+        ----------
+        control_points: typing.List[Point2D] or numpy.ndarray
+            Control points for the Bézier curve
+        """
+        self.control_points = [Point2D.from_array(p) for p in control_points] if isinstance(
+            control_points, np.ndarray) else control_points
 
     @property
-    def degree(self):
+    def degree(self) -> int:
+        """Curve degree"""
         return len(self.control_points) - 1
 
     @degree.setter
@@ -744,185 +1107,153 @@ class Bezier2D(PCurve2D):
                              "the degree of the curve while retaining the shape, or manually add or remove control "
                              "points to change the degree directly.")
 
-    @staticmethod
-    def finite_diff_P(P: np.ndarray, k: int, i: int):
-        """Calculates the finite difference of the control points as shown in
-        https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/Bezier/bezier-der.html
-
-        Arguments
-        =========
-        P: np.ndarray
-            Array of control points for the Bézier curve
-        k: int
-            Finite difference level (e.g., k = 1 is the first derivative finite difference)
-        i: int
-            An index referencing a location in the control point array
-        """
-
-        def finite_diff_recursive(_k, _i):
-            if _k > 1:
-                return finite_diff_recursive(_k - 1, _i + 1) - finite_diff_recursive(_k - 1, _i)
-            else:
-                return P[_i + 1, :] - P[_i, :]
-
-        return finite_diff_recursive(k, i)
-
-    def derivative(self, P: np.ndarray, t: np.ndarray, degree: int, order: int):
+    def get_control_point_array(self, unit: str = "m") -> np.ndarray:
         r"""
-        Calculates an arbitrary-order derivative of the Bézier curve
+        Gets an array representation of the control points
 
         Parameters
-        ==========
-        P: np.ndarray
-            The control point array
-
-        t: np.ndarray
-            The parameter vector
-
-        degree: int
-            The degree of the Bézier curve
-
-        order: int
-            The derivative order. For example, ``order=2`` returns the second derivative.
+        ----------
+        unit: str
+            Physical length unit used to determine the output array. Default: ``"m"``
 
         Returns
-        =======
-        np.ndarray
-            An array of ``shape=(N,2)`` where ``N`` is the number of evaluated points specified by the :math:`t` vector.
-            The columns represent :math:`C^{(m)}_x(t)` and :math:`C^{(m)}_y(t)`, where :math:`m` is the
-            derivative order.
+        -------
+        numpy.ndarray
+            Array of size :math:`(n+1)\times 2` where :math:`n` is the curve degree
         """
-        return np.sum(np.array([np.prod(np.array([degree - idx for idx in range(order)])) *
-                                np.array([self.finite_diff_P(P, order, i)]).T *
-                                np.array([bernstein_poly(degree - order, i, t)])
-                                for i in range(degree + 1 - order)]), axis=0).T
-
-    def get_control_point_array(self, unit: str = "m") -> np.ndarray:
         return np.array([p.as_array(unit=unit) for p in self.control_points])
 
-    @classmethod
-    def generate_from_array(cls, P: np.ndarray, unit: str = "m"):
-        return cls([Point2D(x=Length(**{unit: xy[0]}), y=Length(**{unit: xy[1]})) for xy in P])
-
-    def evaluate_point2d(self, t: float) -> Point2D:
-        n_ctrl_points = len(self.control_points)
-        degree = n_ctrl_points - 1
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
         P = self.get_control_point_array()
+        if isinstance(t, float):
+            return np.array(bezier_curve_eval(P, t))
+        if isinstance(t, int):
+            return np.array(bezier_curve_eval_grid(P, t))
+        return np.array(bezier_curve_eval_tvec(P, t))
 
-        # Evaluate the curve
-        x, y = 0.0, 0.0
-        for i in range(n_ctrl_points):
-            # Calculate the x- and y-coordinates of the Bézier curve given the input vector t
-            x += P[i, 0] * bernstein_poly(degree, i, t)
-            y += P[i, 1] * bernstein_poly(degree, i, t)
+    def evaluate_point2d(self, t: float or int or np.ndarray) -> Point2D or typing.List[Point2D]:
+        t = self._validate_and_convert_t(t)
+        curve = self.evaluate(t)
+        if curve.ndim == 1:
+            return Point2D.from_array(curve)
+        return [Point2D.from_array(curve_point) for curve_point in curve]
 
-        return Point2D(x=Length(m=x), y=Length(m=y))
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        if isinstance(t, float):
+            return np.array(bezier_curve_dcdt(P, t))
+        if isinstance(t, int):
+            return np.array(bezier_curve_dcdt_grid(P, t))
+        return np.array(bezier_curve_dcdt_tvec(P, t))
 
-    def evaluate(self, t: float) -> np.ndarray:
-        return self.evaluate_point2d(t).as_array()
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        if isinstance(t, float):
+            return np.array(bezier_curve_d2cdt2(P, t))
+        if isinstance(t, int):
+            return np.array(bezier_curve_d2cdt2_grid(P, t))
+        return np.array(bezier_curve_d2cdt2_tvec(P, t))
 
-    def evaluate_grid(self, t: np.array or None = None) -> PCurveData2D:
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData2D:
+        xy = self.evaluate(t)
+        xpyp = self.dcdt(t)
+        xppypp = self.d2cdt2(t)
+        return PCurveData2D(
+            t=t, x=xy[:, 0], y=xy[:, 1], xp=xpyp[:, 0], yp=xpyp[:, 1], xpp=xppypp[:, 0], ypp=xppypp[:, 1]
+        )
+
+    def compute_t_corresponding_to_x(self, x_seek: float, t0: float = 0.5) -> float:
         r"""
-        Evaluates the curve using an optionally specified parameter vector.
+        Computes the :math:`t`-value corresponding to a given :math:`x`-value
 
         Parameters
-        ==========
-        t: np.ndarray or ``None``
-            Optional direct specification of the parameter vector for the curve. Not specifying this value
-            gives a linearly spaced parameter vector from ``t_start`` or ``t_end`` with the default size.
-            Default: ``None``
+        ----------
+        x_seek: float
+            :math:`x`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
 
         Returns
-        =======
-        PCurveData
-            Data class specifying the following information about the Bézier curve:
-
-            .. math::
-
-                    C_x(t), C_y(t), C'_x(t), C'_y(t), C''_x(t), C''_y(t), \kappa(t)
-
-            where the :math:`x` and :math:`y` subscripts represent the :math:`x` and :math:`y` components of the
-            vector-valued functions :math:`\vec{C}(t)`, :math:`\vec{C}'(t)`, and :math:`\vec{C}''(t)`.
+        -------
+        float
+            :math:`t`-value corresponding to ``x_seek``
         """
-        # Pass the starting and ending parameter vector values to the parameter vector generator if they were
-        # specified directly
-
-        # Generate the parameter vector
-        t = np.linspace(0.0, 1.0, 100) if t is None else t
-
-        # Number of control points, curve degree, control point array
-        n_ctrl_points = len(self.control_points)
-        degree = n_ctrl_points - 1
-        P = self.get_control_point_array()
-
-        # Evaluate the curve
-        x, y = np.zeros(t.shape), np.zeros(t.shape)
-        for i in range(n_ctrl_points):
-            # Calculate the x- and y-coordinates of the Bézier curve given the input vector t
-            x += P[i, 0] * bernstein_poly(degree, i, t)
-            y += P[i, 1] * bernstein_poly(degree, i, t)
-        xy = np.column_stack((x, y))
-
-        # Calculate the first derivative
-        first_deriv = self.derivative(P=P, t=t, degree=degree, order=1)
-        xp = first_deriv[:, 0]
-        yp = first_deriv[:, 1]
-
-        # Calculate the second derivative
-        second_deriv = self.derivative(P=P, t=t, degree=degree, order=2)
-        xpp = second_deriv[:, 0]
-        ypp = second_deriv[:, 1]
-
-        # Combine the derivative x and y data
-        xpyp = np.column_stack((xp, yp))
-        xppypp = np.column_stack((xpp, ypp))
-
-        # Calculate the curvature
-        with np.errstate(divide='ignore', invalid='ignore'):
-            # Calculate the curvature of the Bézier curve (k = kappa = 1 / R, where R is the radius of curvature)
-            k = np.true_divide((xp * ypp - yp * xpp), (xp ** 2 + yp ** 2) ** (3 / 2))
-
-        # Calculate the radius of curvature: R = 1 / kappa
-        with np.errstate(divide='ignore', invalid='ignore'):
-            R = np.true_divide(1, k)
-
-        return PCurveData2D(t=t, xy=xy, xpyp=xpyp, xppypp=xppypp, k=k, R=R)
-
-    def compute_t_corresponding_to_x(self, x_seek: float, t0: float = 0.5):
         def bez_root_find_func(t):
             point = self.evaluate_point2d(t[0])
             return np.array([point.x.m - x_seek])
 
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
-    def compute_t_corresponding_to_y(self, y_seek: float, t0: float = 0.5):
+    def compute_t_corresponding_to_y(self, y_seek: float, t0: float = 0.5) -> float:
+        r"""
+        Computes the :math:`t`-value corresponding to a given :math:`y`-value
+
+        Parameters
+        ----------
+        y_seek: float
+            :math:`y`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
+
+        Returns
+        -------
+        float
+            :math:`t`-value corresponding to ``y_seek``
+        """
         def bez_root_find_func(t):
             point = self.evaluate_point2d(t[0])
             return np.array([point.y.m - y_seek])
 
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
-    def convert_to_3d(self, plane: str = "XY"):
+    def convert_to_3d(self, plane: str = "XY") -> "BezierCurve3D":
+        """
+        Converts the 2-D Bézier curve to a 3-D Bézier curve by mapping it onto a principal plane. This is done
+        by inserting a column of zeros.
+
+        Parameters
+        ----------
+        plane: str
+            Principal plane, one of 'XY', 'YZ', or 'XZ'
+
+        Returns
+        -------
+        BezierCurve3D
+            Planar 3-D Bézier curve
+        """
         valid_planes = ["XY", "YZ", "XZ"]
         plane_axis_mapping = {k: v for k, v in zip(valid_planes, [2, 0, 1])}
         if plane not in valid_planes:
             raise ValueError(f"Plane must be one of {valid_planes}. Given plane was {plane}")
         P = self.get_control_point_array()
         new_P = np.insert(P, plane_axis_mapping[plane], 0.0, axis=1)
-        return Bezier3D.generate_from_array(new_P)
+        return BezierCurve3D(new_P)
 
-    def transform(self, **transformation_kwargs):
+    def transform(self, **transformation_kwargs) -> "BezierCurve2D":
+        """
+        Creates a transformed copy of the curve by transforming each of the control points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation2D`
+
+        Returns
+        -------
+        BezierCurve2D
+            Transformed curve
+        """
         transformation = Transformation2D(**transformation_kwargs)
-        return Bezier2D.generate_from_array(transformation.transform(self.get_control_point_array()))
+        return BezierCurve2D.generate_from_array(transformation.transform(self.get_control_point_array()))
 
-    def elevate_degree(self) -> "Bezier2D":
+    def elevate_degree(self) -> "BezierCurve2D":
         """
         Elevates the degree of the Bézier curve. See algorithm source
         `here <https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/Bezier/bezier-elev.html>`_.
 
         Returns
         -------
-        Bezier2D
+        BezierCurve2D
             A new Bézier curve with identical shape to the current one but with one additional control point.
         """
         n = self.degree
@@ -939,10 +1270,22 @@ class Bezier2D(PCurve2D):
         for i in range(1, n + 1):  # 1 <= i <= n
             new_control_points[i, :] = i / (n + 1) * P[i - 1, :] + (1 - i / (n + 1)) * P[i, :]
 
-        return Bezier2D.generate_from_array(new_control_points)
+        return BezierCurve2D(new_control_points)
 
-    def split(self, t_split: float):
+    def split(self, t_split: float) -> ("BezierCurve2D", "BezierCurve2D"):
+        r"""
+        Splits the curve into two curves at a given :math:`t`-value by applying the de-Casteljau algorithm
 
+        Parameters
+        ----------
+        t_split: float
+            :math:`t`-value at which to split the curve
+
+        Returns
+        -------
+        Bezier2D, Bezier2D
+            Two new curves split at the input :math:`t`-value
+        """
         # Number of control points, curve degree, control point array
         n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
@@ -978,16 +1321,24 @@ class Bezier2D(PCurve2D):
             self.control_points[-1]]
 
         return (
-            Bezier2D(bez_1_points),
-            Bezier2D(bez_2_points)
+            BezierCurve2D(bez_1_points),
+            BezierCurve2D(bez_2_points)
         )
 
 
-class Bezier3D(PCurve3D):
+class BezierCurve3D(PCurve3D):
+    """Three-dimensional Bézier curve class"""
+    def __init__(self, control_points: typing.List[Point3D] or np.ndarray):
+        """
+        Creates a three-dimensional Bézier curve objects from a list of control points
 
-    def __init__(self, control_points: typing.List[Point3D]):
-        self.control_points = control_points
-        self.curve_connections = []
+        Parameters
+        ----------
+        control_points: typing.List[Point3D] or numpy.ndarray
+            Control points for the Bézier curve
+        """
+        self.control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
+            control_points, np.ndarray) else control_points
 
     @property
     def degree(self):
@@ -1004,171 +1355,119 @@ class Bezier3D(PCurve3D):
             control_points_XYZ=self.get_control_point_array(),
         )
 
-    def reverse(self) -> "Bezier3D":
+    def reverse(self) -> "BezierCurve3D":
+        """
+        Creates a copy of the curve with the parametric direction reversed. This is done by reversing the order
+        of the control points
+
+        Returns
+        -------
+        BezierCurve3D
+            Reversed curve
+        """
         return self.__class__(self.control_points[::-1])
 
     def to_rational_bezier_curve(self) -> "RationalBezierCurve3D":
+        """
+        Converts the curve to a rational Bézier curve by setting all weights to unity
+
+        Returns
+        -------
+        RationalBezierCurve3D
+            Rational version of the curve
+        """
         return RationalBezierCurve3D(self.control_points, np.ones(self.degree + 1))
 
-    def projection_on_principal_plane(self, plane: str = "XY") -> Bezier2D:
-        return Bezier2D(control_points=[pt.projection_on_principal_plane(plane) for pt in self.control_points])
-
-    @staticmethod
-    def finite_diff_P(P: np.ndarray, k: int, i: int):
-        """Calculates the finite difference of the control points as shown in
-        https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/Bezier/bezier-der.html
-
-        Arguments
-        =========
-        P: np.ndarray
-            Array of control points for the Bézier curve
-        k: int
-            Finite difference level (e.g., k = 1 is the first derivative finite difference)
-        i: int
-            An index referencing a location in the control point array
-        """
-
-        def finite_diff_recursive(_k, _i):
-            if _k > 1:
-                return finite_diff_recursive(_k - 1, _i + 1) - finite_diff_recursive(_k - 1, _i)
-            else:
-                return P[_i + 1, :] - P[_i, :]
-
-        return finite_diff_recursive(k, i)
-
-    def derivative(self, P: np.ndarray, t: np.ndarray, degree: int, order: int):
+    def project_onto_principal_plane(self, plane: str = "XY") -> BezierCurve2D:
         r"""
-        Calculates an arbitrary-order derivative of the Bézier curve
+        Projects the curve onto a principal plane
 
         Parameters
-        ==========
-        P: np.ndarray
-            The control point array
-
-        t: np.ndarray
-            The parameter vector
-
-        degree: int
-            The degree of the Bézier curve
-
-        order: int
-            The derivative order. For example, ``order=2`` returns the second derivative.
+        ----------
+        plane: str
+            Plane on which to project the line. Either 'XY', 'YZ', or 'XZ'
 
         Returns
-        =======
-        np.ndarray
-            An array of ``shape=(N,2)`` where ``N`` is the number of evaluated points specified by the :math:`t` vector.
-            The columns represent :math:`C^{(m)}_x(t)` and :math:`C^{(m)}_y(t)`, where :math:`m` is the
-            derivative order.
+        -------
+        BezierCurve2D
+            Projected curve
         """
-        if order > degree:
-            return np.zeros((len(t), 3))
-        return np.sum(np.array([np.prod(np.array([degree - idx for idx in range(order)])) *
-                                np.array([self.finite_diff_P(P, order, i)]).T *
-                                np.array([bernstein_poly(degree - order, i, t)])
-                                for i in range(degree + 1 - order)]), axis=0).T
+        return BezierCurve2D(control_points=[pt.projection_on_principal_plane(plane) for pt in self.control_points])
 
     def get_control_point_array(self, unit: str = "m") -> np.ndarray:
-        return np.array([p.as_array(unit=unit) for p in self.control_points])
-
-    @classmethod
-    def generate_from_array(cls, P: np.ndarray, unit: str = "m"):
-        return cls([Point3D(x=Length(**{unit: xyz[0]}),
-                            y=Length(**{unit: xyz[1]}),
-                            z=Length(**{unit: xyz[2]})) for xyz in P])
-
-    def evaluate_point3d(self, t: float) -> Point3D:
-        n_ctrl_points = len(self.control_points)
-        degree = n_ctrl_points - 1
-        P = self.get_control_point_array()
-
-        # Evaluate the curve
-        x, y, z = 0.0, 0.0, 0.0
-        for i in range(n_ctrl_points):
-            # Calculate the x- and y-coordinates of the Bézier curve given the input vector t
-            x += P[i, 0] * bernstein_poly(degree, i, t)
-            y += P[i, 1] * bernstein_poly(degree, i, t)
-            z += P[i, 2] * bernstein_poly(degree, i, t)
-
-        return Point3D(x=Length(m=x), y=Length(m=y), z=Length(m=z))
-
-    def evaluate_single_t(self, t: float) -> np.ndarray:
-        return self.evaluate_point3d(t).as_array()
-
-    def evaluate(self, t: np.array = None) -> PCurveData3D:
         r"""
-        Evaluates the curve using an optionally specified parameter vector.
+        Gets an array representation of the control points
 
         Parameters
-        ==========
-        t: np.ndarray or ``None``
-            Optional direct specification of the parameter vector for the curve. Not specifying this value
-            gives a linearly spaced parameter vector from ``t_start`` or ``t_end`` with the default size.
-            Default: ``None``
+        ----------
+        unit: str
+            Physical length unit used to determine the output array. Default: ``"m"``
 
         Returns
-        =======
-        PCurveData
-            Data class specifying the following information about the Bézier curve:
-
-            .. math::
-
-                    C_x(t), C_y(t), C'_x(t), C'_y(t), C''_x(t), C''_y(t), \kappa(t)
-
-            where the :math:`x` and :math:`y` subscripts represent the :math:`x` and :math:`y` components of the
-            vector-valued functions :math:`\vec{C}(t)`, :math:`\vec{C}'(t)`, and :math:`\vec{C}''(t)`.
+        -------
+        numpy.ndarray
+            Array of size :math:`(n+1)\times 3` where :math:`n` is the curve degree
         """
-        # Pass the starting and ending parameter vector values to the parameter vector generator if they were
-        # specified directly
+        return np.array([p.as_array(unit=unit) for p in self.control_points])
 
-        # Generate the parameter vector
-        t = np.linspace(0.0, 1.0, 100) if t is None else t
-
-        # Number of control points, curve degree, control point array
-        n_ctrl_points = len(self.control_points)
-        degree = n_ctrl_points - 1
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
         P = self.get_control_point_array()
+        if isinstance(t, float):
+            return np.array(bezier_curve_eval(P, t))
+        if isinstance(t, int):
+            return np.array(bezier_curve_eval_grid(P, t))
+        return np.array(bezier_curve_eval_tvec(P, t))
 
-        # Evaluate the curve
-        x, y, z = np.zeros(t.shape), np.zeros(t.shape), np.zeros(t.shape)
-        for i in range(n_ctrl_points):
-            # Calculate the x- and y-coordinates of the Bézier curve given the input vector t
-            x += P[i, 0] * bernstein_poly(degree, i, t)
-            y += P[i, 1] * bernstein_poly(degree, i, t)
-            z += P[i, 2] * bernstein_poly(degree, i, t)
-        xyz = np.column_stack((x, y, z))
+    def evaluate_point3d(self, t: float or int or np.ndarray) -> Point3D or typing.List[Point3D]:
+        t = self._validate_and_convert_t(t)
+        curve = self.evaluate(t)
+        if curve.ndim == 1:
+            return Point3D.from_array(curve)
+        return [Point3D.from_array(curve_point) for curve_point in curve]
 
-        # Calculate the first derivative
-        first_deriv = self.derivative(P=P, t=t, degree=degree, order=1)
-        xp = first_deriv[:, 0]
-        yp = first_deriv[:, 1]
-        zp = first_deriv[:, 2]
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        if isinstance(t, float):
+            return np.array(bezier_curve_dcdt(P, t))
+        if isinstance(t, int):
+            return np.array(bezier_curve_dcdt_grid(P, t))
+        return np.array(bezier_curve_dcdt_tvec(P, t))
 
-        # Calculate the second derivative
-        second_deriv = self.derivative(P=P, t=t, degree=degree, order=2)
-        xpp = second_deriv[:, 0]
-        ypp = second_deriv[:, 1]
-        zpp = second_deriv[:, 2]
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        if isinstance(t, float):
+            return np.array(bezier_curve_d2cdt2(P, t))
+        if isinstance(t, int):
+            return np.array(bezier_curve_d2cdt2_grid(P, t))
+        return np.array(bezier_curve_d2cdt2_tvec(P, t))
 
-        # Combine the derivative x and y data
-        xpypzp = np.column_stack((xp, yp, zp))
-        xppyppzpp = np.column_stack((xpp, ypp, zpp))
-
-        # Calculate the curvature
-        with np.errstate(divide='ignore', invalid='ignore'):
-            # Calculate the curvature of the Bézier curve (k = kappa = 1 / R, where R is the radius of curvature)
-            k = np.true_divide(
-                np.linalg.norm(np.cross(xpypzp, xppyppzpp), axis=1),
-                np.linalg.norm(xpypzp, axis=1) ** 3
-            )
-
-        # Calculate the radius of curvature: R = 1 / kappa
-        with np.errstate(divide='ignore', invalid='ignore'):
-            R = np.true_divide(1, k)
-
-        return PCurveData3D(t=t, xyz=xyz, xpypzp=xpypzp, xppyppzpp=xppyppzpp, k=k, R=R)
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData3D:
+        xyz = self.evaluate(t)
+        xpypzp = self.dcdt(t)
+        xppyppzpp = self.d2cdt2(t)
+        return PCurveData3D(
+            t=t,
+            x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2],
+            xp=xpypzp[:, 0], yp=xpypzp[:, 1], zp=xpypzp[:, 2],
+            xpp=xppyppzpp[:, 0], ypp=xppyppzpp[:, 1], zpp=xppyppzpp[:, 2]
+        )
 
     def compute_t_corresponding_to_x(self, x_seek: float, t0: float = 0.5):
+        r"""
+        Computes the :math:`t`-value corresponding to a given :math:`x`-value
+
+        Parameters
+        ----------
+        x_seek: float
+            :math:`x`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
+
+        Returns
+        -------
+        float
+            :math:`t`-value corresponding to ``x_seek``
+        """
         def bez_root_find_func(t):
             point = self.evaluate_point3d(t[0])
             return np.array([point.x.m - x_seek])
@@ -1176,6 +1475,21 @@ class Bezier3D(PCurve3D):
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
     def compute_t_corresponding_to_y(self, y_seek: float, t0: float = 0.5):
+        r"""
+        Computes the :math:`t`-value corresponding to a given :math:`y`-value
+
+        Parameters
+        ----------
+        y_seek: float
+            :math:`y`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
+
+        Returns
+        -------
+        float
+            :math:`t`-value corresponding to ``y_seek``
+        """
         def bez_root_find_func(t):
             point = self.evaluate_point3d(t[0])
             return np.array([point.y.m - y_seek])
@@ -1183,24 +1497,52 @@ class Bezier3D(PCurve3D):
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
     def compute_t_corresponding_to_z(self, z_seek: float, t0: float = 0.5):
+        r"""
+        Computes the :math:`t`-value corresponding to a given :math:`z`-value
+
+        Parameters
+        ----------
+        z_seek: float
+            :math:`z`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
+
+        Returns
+        -------
+        float
+            :math:`t`-value corresponding to ``z_seek``
+        """
         def bez_root_find_func(t):
             point = self.evaluate_point3d(t[0])
             return np.array([point.z.m - z_seek])
 
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
-    def transform(self, **transformation_kwargs) -> "Bezier3D":
-        transformation = Transformation3D(**transformation_kwargs)
-        return Bezier3D.generate_from_array(transformation.transform(self.get_control_point_array()))
+    def transform(self, **transformation_kwargs) -> "BezierCurve3D":
+        """
+        Creates a transformed copy of the curve by transforming each of the control points
 
-    def elevate_degree(self) -> "Bezier3D":
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        BezierCurve3D
+            Transformed curve
+        """
+        transformation = Transformation3D(**transformation_kwargs)
+        return BezierCurve3D.generate_from_array(transformation.transform(self.get_control_point_array()))
+
+    def elevate_degree(self) -> "BezierCurve3D":
         """
         Elevates the degree of the Bézier curve. See algorithm source
         `here <https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/Bezier/bezier-elev.html>`_.
 
         Returns
         -------
-        Bezier3D
+        BezierCurve3D
             A new Bézier curve with identical shape to the current one but with one additional control point.
         """
         n = self.degree
@@ -1217,10 +1559,22 @@ class Bezier3D(PCurve3D):
         for i in range(1, n + 1):  # 1 <= i <= n
             new_control_points[i, :] = i / (n + 1) * P[i - 1, :] + (1 - i / (n + 1)) * P[i, :]
 
-        return Bezier3D.generate_from_array(new_control_points)
+        return BezierCurve3D.generate_from_array(new_control_points)
 
-    def split(self, t_split: float) -> ("Bezier3D", "Bezier3D"):
+    def split(self, t_split: float) -> ("BezierCurve3D", "BezierCurve3D"):
+        r"""
+        Splits the curve into two curves at a given :math:`t`-value by applying the de-Casteljau algorithm
 
+        Parameters
+        ----------
+        t_split: float
+            :math:`t`-value at which to split the curve
+
+        Returns
+        -------
+        Bezier3D, Bezier3D
+            Two new curves split at the input :math:`t`-value
+        """
         # Number of control points, curve degree, control point array
         n_ctrl_points = len(self.control_points)
         degree = n_ctrl_points - 1
@@ -1257,13 +1611,29 @@ class Bezier3D(PCurve3D):
             Length(m=xyz[0]), Length(m=xyz[1]), Length(m=xyz[2])) for xyz in bez_split_2_P[1:-1, :]] + [self.control_points[-1]]
 
         return (
-            Bezier3D(bez_1_points),
-            Bezier3D(bez_2_points)
+            BezierCurve3D(bez_1_points),
+            BezierCurve3D(bez_2_points)
         )
 
-    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, t_vec: np.ndarray = None, **plt_kwargs):
+    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, nt: int = 201, **plt_kwargs):
+        """
+        Plots the curve on a :obj:`matplotlib.pyplot.Axes` or a `pyvista.Plotter` window
+
+        Parameters
+        ----------
+        ax: plt.Axes or pv.Plotter
+            Axes/window on which to plot
+        projection: str
+            Projection on which to plot (either 'XY', 'YZ', 'XZ', or 'XYZ' for a 3-D plot). Only used if
+            ``ax`` is a ``plt.Axes``. Defaults to 'XYZ' if not specified. Default: ``None``
+        nt: int
+            Number of evenly-spaced parameter values to plot. Default: ``201``
+        plt_kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot` or
+            :obj:`pyvista.Plotter.add_lines`
+        """
         projection = "XYZ" if projection is None else projection
-        t_vec = np.linspace(0.0, 1.0, 201) if t_vec is None else None
+        t_vec = np.linspace(0.0, 1.0, nt)
         data = self.evaluate(t_vec).xyz
         args = tuple([data[:, _projection_dict[axis]] for axis in projection])
 
@@ -1278,156 +1648,21 @@ class Bezier3D(PCurve3D):
             ax.add_lines(np.array(arr), **plt_kwargs)
 
 
-class NURBSCurve3D(Geometry3D):
-    def __init__(self,
-                 control_points: typing.List[Point3D] or np.ndarray,
-                 weights: np.ndarray,
-                 knot_vector: np.ndarray,
-                 degree: int):
+class RationalBezierCurve3D(PCurve3D):
+    """Three-dimensional rational Bézier curve class"""
+    def __init__(self, control_points: typing.List[Point3D] or np.ndarray, weights: np.ndarray):
         """
-        Non-uniform rational B-spline (NURBS) curve evaluation class
-        """
-        control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
-            control_points, np.ndarray) else control_points
-        assert weights.ndim == 1
-        assert knot_vector.ndim == 1
-        assert len(knot_vector) == len(control_points) + degree + 1
-        assert len(control_points) == len(weights)
-
-        # Negative weight check
-        for weight in weights:
-            if weight < 0:
-                raise NegativeWeightError("All weights must be non-negative")
-
-        self.control_points = control_points
-        self.weights = np.array(weights)
-        self.knot_vector = np.array(knot_vector)
-        self.degree = degree
-        self.possible_spans, self.possible_span_indices = self._get_possible_spans()
-
-    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
-        return aerocaps.iges.curves.RationalBSplineCurveIGES(
-            knots=self.knot_vector,
-            weights=self.weights,
-            control_points_XYZ=self.get_control_point_array(),
-            degree=self.degree
-        )
-
-    def reverse(self) -> "NURBSCurve3D":
-        return self.__class__(np.flipud(self.get_control_point_array()),
-                              self.weights[::-1],
-                              (1.0 - self.knot_vector)[::-1],
-                              self.degree)
-
-    def get_control_point_array(self) -> np.ndarray:
-        return np.array([p.as_array() for p in self.control_points])
-
-    def get_homogeneous_control_points(self) -> np.ndarray:
-        r"""
-        Gets the array of control points in homogeneous coordinates, :math:`\mathbf{P}_i \cdot w_i`
-
-        Returns
-        -------
-        numpy.ndarray
-            Array of size :math:`(n + 1) \times 4`, where :math:`n` is the curve degree. The four columns, in order,
-            represent the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
-            control point.
-        """
-        return np.column_stack((
-            self.get_control_point_array() * np.repeat(self.weights[:, np.newaxis], 3, axis=1),
-            self.weights
-        ))
-
-    def evaluate_ndarray(self, t: float) -> np.ndarray:
-        """
-        Evaluate the NURBS curve at parameter t
-        """
-        B = self._basis_functions(t, self.degree)
-        P = self.get_control_point_array()
-        point = np.dot(B * self.weights, P) / np.sum(B * self.weights)
-        return point
-
-    def evaluate_simple(self, t: float) -> Point3D:
-        """
-        Evaluates the NURBS curve at parameter t as a ``Point3D``
+        Creates a three-dimensional rational Bézier curve objects from a list of control points and weights
 
         Parameters
         ----------
-        t: float
-            Parameter value
-
-        Returns
-        -------
-        Point3D
-            Value of the NURBS curve at the specified parameter value
+        control_points: typing.List[Point3D] or numpy.ndarray
+            Control points for the Bézier curve
+        weights: numpy.ndarray
+            Weights for the control points. Must have the same length as the control point array
         """
-        return Point3D.from_array(self.evaluate_ndarray(t))
-
-    def evaluate(self, t_vec: np.ndarray) -> np.ndarray:
-        """
-        Evaluates the NURBS curve at a vector of parameter values
-        """
-        points = np.array([self.evaluate_ndarray(t) for t in t_vec])
-        return points
-
-    def _get_possible_spans(self) -> (np.ndarray, np.ndarray):
-        possible_span_indices = np.array([], dtype=int)
-        possible_spans = []
-        for knot_idx, (knot_1, knot_2) in enumerate(zip(self.knot_vector[:-1], self.knot_vector[1:])):
-            if knot_1 == knot_2:
-                continue
-            possible_span_indices = np.append(possible_span_indices, knot_idx)
-            possible_spans.append([knot_1, knot_2])
-        return np.array(possible_spans), possible_span_indices
-
-    def _cox_de_boor(self, t: float, i: int, p: int) -> float:
-        if p == 0:
-            return 1.0 if i in self.possible_span_indices and self._find_span(t) == i else 0.0
-        else:
-            with np.errstate(divide="ignore", invalid="ignore"):
-                f = (t - self.knot_vector[i]) / (self.knot_vector[i + p] - self.knot_vector[i])
-                g = (self.knot_vector[i + p + 1] - t) / (self.knot_vector[i + p + 1] - self.knot_vector[i + 1])
-                if np.isinf(f) or np.isnan(f):
-                    f = 0.0
-                if np.isinf(g) or np.isnan(g):
-                    g = 0.0
-                if f == 0.0 and g == 0.0:
-                    return 0.0
-                elif f != 0.0 and g == 0.0:
-                    return f * self._cox_de_boor(t, i, p - 1)
-                elif f == 0.0 and g != 0.0:
-                    return g * self._cox_de_boor(t, i + 1, p - 1)
-                else:
-                    return f * self._cox_de_boor(t, i, p - 1) + g * self._cox_de_boor(t, i + 1, p - 1)
-
-    def _basis_functions(self, t: float, p: int):
-        """
-        Compute the non-zero basis functions at parameter t
-        """
-        return np.array([self._cox_de_boor(t, i, p) for i in range(self.control_points.shape[0])])
-
-    def _find_span(self, t: float):
-        """
-        Find the knot span index
-        """
-        # insertion_point = bisect.bisect_left(self.non_repeated_knots, t)
-        # return self.possible_spans[insertion_point - 1]
-        for knot_span, knot_span_idx in zip(self.possible_spans, self.possible_span_indices):
-            if knot_span[0] <= t < knot_span[1]:
-                return knot_span_idx
-        if t == self.possible_spans[-1][1]:
-            return self.possible_span_indices[-1]
-
-
-class RationalBezierCurve3D(Geometry3D):
-
-    def __init__(self,
-                 control_points: typing.List[Point3D],
-                 weights: np.ndarray):
-        """
-        Non-uniform rational B-spline (NURBS) curve evaluation class
-        """
-        self.control_points = control_points
+        self.control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
+            control_points, np.ndarray) else control_points
         assert weights.ndim == 1
         assert len(control_points) == len(weights)
 
@@ -1493,14 +1728,21 @@ class RationalBezierCurve3D(Geometry3D):
 
         return RationalBezierCurve3D.generate_from_array(new_control_points, new_weights)
 
-    def evaluate_ndarray(self, t: float) -> np.ndarray:
-        """
-        Evaluate the NURBS curve at parameter t
-        """
-        return self.evaluate_simple(t).as_array()
+    def get_control_point_array(self, unit: str = "m") -> np.ndarray:
+        r"""
+        Gets an array representation of the control points
 
-    def get_control_point_array(self) -> np.ndarray:
-        return np.array([p.as_array() for p in self.control_points])
+        Parameters
+        ----------
+        unit: str
+            Physical length unit used to determine the output array. Default: ``"m"``
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n+1)\times 3` where :math:`n` is the curve degree
+        """
+        return np.array([p.as_array(unit=unit) for p in self.control_points])
 
     def get_homogeneous_control_points(self) -> np.ndarray:
         r"""
@@ -1522,52 +1764,139 @@ class RationalBezierCurve3D(Geometry3D):
     def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
         return cls([Point3D(x=Length(m=xyz[0]), y=Length(m=xyz[1]), z=Length(m=xyz[2])) for xyz in P], weights)
 
-    def evaluate_simple(self, t: float) -> Point3D:
-        n_ctrl_points = len(self.control_points)
-        degree = n_ctrl_points - 1
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
         P = self.get_control_point_array()
+        w = self.weights
+        if isinstance(t, float):
+            return np.array(rational_bezier_curve_eval(P, w, t))
+        if isinstance(t, int):
+            return np.array(rational_bezier_curve_eval_grid(P, w, t))
+        return np.array(rational_bezier_curve_eval_tvec(P, w, t))
 
-        # Evaluate the curve
-        w_sum = sum([bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
-        x = sum([P[i, 0] * bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
-        y = sum([P[i, 1] * bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
-        z = sum([P[i, 2] * bernstein_poly(degree, i, t) * self.weights[i] for i in range(n_ctrl_points)])
+    def evaluate_point3d(self, t: float or int or np.ndarray) -> Point3D or typing.List[Point3D]:
+        curve = self.evaluate(t)
+        if curve.ndim == 1:
+            return Point3D.from_array(curve)
+        return [Point3D.from_array(curve_point) for curve_point in curve]
 
-        return Point3D(x=Length(m=x / w_sum), y=Length(m=y / w_sum), z=Length(m=z / w_sum))
-        # return Point3D(x=Length(m=x), y=Length(m=y), z=Length(m=z))
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        w = self.weights
+        if isinstance(t, float):
+            return np.array(rational_bezier_curve_dcdt(P, w, t))
+        if isinstance(t, int):
+            return np.array(rational_bezier_curve_dcdt_grid(P, w, t))
+        return np.array(rational_bezier_curve_dcdt_tvec(P, w, t))
 
-    def evaluate(self, t_vec: np.ndarray) -> np.ndarray:
-        """
-        Evaluates the NURBS curve at a vector of parameter values
-        """
-        points = np.array([self.evaluate_simple(t) for t in t_vec])
-        return points
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        w = self.weights
+        if isinstance(t, float):
+            return np.array(rational_bezier_curve_d2cdt2(P, w, t))
+        if isinstance(t, int):
+            return np.array(rational_bezier_curve_d2cdt2_grid(P, w, t))
+        return np.array(rational_bezier_curve_d2cdt2_tvec(P, w, t))
+
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData3D:
+        xyz = self.evaluate(t)
+        xpypzp = self.dcdt(t)
+        xppyppzpp = self.d2cdt2(t)
+        return PCurveData3D(
+            t=t,
+            x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2],
+            xp=xpypzp[:, 0], yp=xpypzp[:, 1], zp=xpypzp[:, 2],
+            xpp=xppyppzpp[:, 0], ypp=xppyppzpp[:, 1], zpp=xppyppzpp[:, 2]
+        )
 
     def compute_t_corresponding_to_x(self, x_seek: float, t0: float = 0.5):
+        r"""
+        Computes the :math:`t`-value corresponding to a given :math:`x`-value
+
+        Parameters
+        ----------
+        x_seek: float
+            :math:`x`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
+
+        Returns
+        -------
+        float
+            :math:`t`-value corresponding to ``x_seek``
+        """
+
         def bez_root_find_func(t):
-            point = self.evaluate_simple(t[0])
+            point = self.evaluate_point3d(t[0])
             return np.array([point.x.m - x_seek])
 
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
     def compute_t_corresponding_to_y(self, y_seek: float, t0: float = 0.5):
+        r"""
+        Computes the :math:`t`-value corresponding to a given :math:`y`-value
+
+        Parameters
+        ----------
+        y_seek: float
+            :math:`y`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
+
+        Returns
+        -------
+        float
+            :math:`t`-value corresponding to ``y_seek``
+        """
+
         def bez_root_find_func(t):
-            point = self.evaluate_simple(t[0])
+            point = self.evaluate_point3d(t[0])
             return np.array([point.y.m - y_seek])
 
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
     def compute_t_corresponding_to_z(self, z_seek: float, t0: float = 0.5):
+        r"""
+        Computes the :math:`t`-value corresponding to a given :math:`z`-value
+
+        Parameters
+        ----------
+        z_seek: float
+            :math:`z`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
+
+        Returns
+        -------
+        float
+            :math:`t`-value corresponding to ``z_seek``
+        """
+
         def bez_root_find_func(t):
-            point = self.evaluate_simple(t[0])
+            point = self.evaluate_point3d(t[0])
             return np.array([point.z.m - z_seek])
 
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
-    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, t_vec: np.ndarray = None, **plt_kwargs):
+    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, nt: int = 201, **plt_kwargs):
+        """
+        Plots the curve on a :obj:`matplotlib.pyplot.Axes` or a `pyvista.Plotter` window
+
+        Parameters
+        ----------
+        ax: plt.Axes or pv.Plotter
+            Axes/window on which to plot
+        projection: str
+            Projection on which to plot (either 'XY', 'YZ', 'XZ', or 'XYZ' for a 3-D plot). Only used if
+            ``ax`` is a ``plt.Axes``. Defaults to 'XYZ' if not specified. Default: ``None``
+        nt: int
+            Number of evenly-spaced parameter values to plot. Default: ``201``
+        plt_kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot` or
+            :obj:`pyvista.Plotter.add_lines`
+        """
         projection = "XYZ" if projection is None else projection
-        t_vec = np.linspace(0.0, 1.0, 201) if t_vec is None else None
-        data = self.evaluate(t_vec)
+        t_vec = np.linspace(0.0, 1.0, nt)
+        data = self.evaluate(t_vec).xyz
         args = tuple([data[:, _projection_dict[axis]] for axis in projection])
 
         if isinstance(ax, plt.Axes):
@@ -1581,42 +1910,24 @@ class RationalBezierCurve3D(Geometry3D):
             ax.add_lines(np.array(arr), **plt_kwargs)
 
     def plot_control_points(self, ax: plt.Axes, projection: str = None, **plt_kwargs):
+        """
+        Plots the control points on a :obj:`matplotlib.pyplot.Axes`
+
+        Parameters
+        ----------
+        ax: plt.Axes or pv.Plotter
+            Axes/window on which to plot
+        projection: str
+            Projection on which to plot (either 'XY', 'YZ', 'XZ', or 'XYZ' for a 3-D plot). Only used if
+            ``ax`` is a ``plt.Axes``. Defaults to 'XYZ' if not specified. Default: ``None``
+        plt_kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot` or
+            :obj:`pyvista.Plotter.add_lines`
+        """
         projection = "XYZ" if projection is None else projection
         cps = self.get_control_point_array()
         args = tuple([cps[:, _projection_dict[axis]] for axis in projection])
         ax.plot(*args, **plt_kwargs)
-
-    def compute_curvature_at_t0(self) -> float:
-        """
-        Computes the curvature at :math:`t=0` according to Eq. (20) in
-        M. S. Floater, “Derivatives of Rational Bézier Curves,” Computer Aided Geometric Design, vol. 9, no. 3,
-        pp. 161–174, Aug. 1992, issn: 0167-8396. doi: 10.1016/0167-8396(92)90014-G.
-
-        Returns
-        -------
-        float
-            The curvature at :math:`t=0`
-        """
-        R1 = (self.weights[0] * self.weights[2]) / self.weights[1]**2
-        P01 = Vector3D(p0=self.control_points[0], p1=self.control_points[1])
-        P12 = Vector3D(p0=self.control_points[1], p1=self.control_points[2])
-        return (self.degree - 1) / self.degree * R1 * P01.cross(P12).mag().m / P01.mag().m**3
-
-    def compute_curvature_at_t1(self) -> float:
-        """
-        Computes the curvature at :math:`t=1` according to Eq. (20) in
-        M. S. Floater, “Derivatives of Rational Bézier Curves,” Computer Aided Geometric Design, vol. 9, no. 3,
-        pp. 161–174, Aug. 1992, issn: 0167-8396. doi: 10.1016/0167-8396(92)90014-G.
-
-        Returns
-        -------
-        float
-            The curvature at :math:`t=1`
-        """
-        R1 = (self.weights[-1] * self.weights[-3]) / self.weights[-2] ** 2
-        P_nm2_nm1 = Vector3D(p0=self.control_points[-3], p1=self.control_points[-2])
-        P_nm1_n = Vector3D(p0=self.control_points[-2], p1=self.control_points[-1])
-        return (self.degree - 1) / self.degree * R1 * P_nm2_nm1.cross(P_nm1_n).mag().m / P_nm1_n.mag().m ** 3
 
     def enforce_g0(self, other: "RationalBezierCurve3D"):
         other.control_points[0] = self.control_points[-1]
@@ -1654,24 +1965,25 @@ class RationalBezierCurve3D(Geometry3D):
         self.enforce_g0g1g2(other, f=1.0)
 
 
-class BSpline3D(Geometry3D):
+class BSplineCurve3D(PCurve3D):
+    """Three-dimensional B-spline curve class"""
     def __init__(self,
-                 control_points: np.ndarray,
+                 control_points: typing.List[Point3D] or np.ndarray,
                  knot_vector: np.ndarray,
                  degree: int):
         """
-        Non-uniform rational B-spline (NURBS) curve evaluation class
+        Three-dimensional B-spline curve class
         """
-        assert control_points.ndim == 2
+        control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
+            control_points, np.ndarray) else control_points
         assert knot_vector.ndim == 1
         assert len(knot_vector) == len(control_points) + degree + 1
 
         self.control_points = control_points
-        self.dim = self.control_points.shape[1]
+        self.dim = 3
         self.knot_vector = np.array(knot_vector)
-        self.weights = np.ones(self.control_points[:, 0].shape)
+        self.weights = np.ones(len(self.control_points))
         self.degree = degree
-        self.possible_spans, self.possible_span_indices = self._get_possible_spans()
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.curves.RationalBSplineCurveIGES(
@@ -1681,89 +1993,201 @@ class BSpline3D(Geometry3D):
             degree=self.degree
         )
 
-    def reverse(self) -> "BSpline3D":
+    def reverse(self) -> "BSplineCurve3D":
         return self.__class__(np.flipud(self.control_points),
                               (1.0 - self.knot_vector)[::-1],
                               self.degree)
 
-    def evaluate_ndarray(self, t: float) -> np.ndarray:
-        """
-        Evaluate the NURBS curve at parameter t
-        """
-        B = self._basis_functions(t, self.degree)
-        point = np.dot(B, self.control_points)
-        return point
-
-    def evaluate_simple(self, t: float) -> Point3D:
-        """
-        Evaluates the NURBS curve at parameter t as a ``Point3D``
+    def get_control_point_array(self, unit: str = "m") -> np.ndarray:
+        r"""
+        Gets an array representation of the control points
 
         Parameters
         ----------
-        t: float
-            Parameter value
+        unit: str
+            Physical length unit used to determine the output array. Default: ``"m"``
 
         Returns
         -------
-        Point3D
-            Value of the NURBS curve at the specified parameter value
+        numpy.ndarray
+            Array of size :math:`(n+1)\times 3` where :math:`n` is the curve degree
         """
-        return Point3D.from_array(self.evaluate_ndarray(t))
+        return np.array([p.as_array(unit=unit) for p in self.control_points])
 
-    def evaluate(self, t_vec: np.ndarray) -> np.ndarray:
-        """
-        Evaluates the NURBS curve at a vector of parameter values
-        """
-        points = np.array([self.evaluate_ndarray(t) for t in t_vec])
-        return points
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        k = self.knot_vector
+        if isinstance(t, float):
+            return np.array(bspline_curve_eval(P, k, t))
+        if isinstance(t, int):
+            return np.array(bspline_curve_eval_grid(P, k, t))
+        return np.array(bspline_curve_eval_tvec(P, k, t))
 
-    def _get_possible_spans(self) -> (np.ndarray, np.ndarray):
-        possible_span_indices = np.array([], dtype=int)
-        possible_spans = []
-        for knot_idx, (knot_1, knot_2) in enumerate(zip(self.knot_vector[:-1], self.knot_vector[1:])):
-            if knot_1 == knot_2:
-                continue
-            possible_span_indices = np.append(possible_span_indices, knot_idx)
-            possible_spans.append([knot_1, knot_2])
-        return np.array(possible_spans), possible_span_indices
+    def evaluate_point3d(self, t: float or int or np.ndarray) -> Point3D or typing.List[Point3D]:
+        curve = self.evaluate(t)
+        if curve.ndim == 1:
+            return Point3D.from_array(curve)
+        return [Point3D.from_array(curve_point) for curve_point in curve]
 
-    def _cox_de_boor(self, t: float, i: int, p: int) -> float:
-        if p == 0:
-            return 1.0 if i in self.possible_span_indices and self._find_span(t) == i else 0.0
-        else:
-            with np.errstate(divide="ignore", invalid="ignore"):
-                f = (t - self.knot_vector[i]) / (self.knot_vector[i + p] - self.knot_vector[i])
-                g = (self.knot_vector[i + p + 1] - t) / (self.knot_vector[i + p + 1] - self.knot_vector[i + 1])
-                if np.isinf(f) or np.isnan(f):
-                    f = 0.0
-                if np.isinf(g) or np.isnan(g):
-                    g = 0.0
-                if f == 0.0 and g == 0.0:
-                    return 0.0
-                elif f != 0.0 and g == 0.0:
-                    return f * self._cox_de_boor(t, i, p - 1)
-                elif f == 0.0 and g != 0.0:
-                    return g * self._cox_de_boor(t, i + 1, p - 1)
-                else:
-                    return f * self._cox_de_boor(t, i, p - 1) + g * self._cox_de_boor(t, i + 1, p - 1)
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        k = self.knot_vector
+        if isinstance(t, float):
+            return np.array(bspline_curve_dcdt(P, k, t))
+        if isinstance(t, int):
+            return np.array(bspline_curve_dcdt_grid(P, k, t))
+        return np.array(bspline_curve_dcdt_tvec(P, k, t))
 
-    def _basis_functions(self, t: float, p: int):
-        """
-        Compute the non-zero basis functions at parameter t
-        """
-        return np.array([self._cox_de_boor(t, i, p) for i in range(self.control_points.shape[0])])
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        k = self.knot_vector
+        if isinstance(t, float):
+            return np.array(bspline_curve_d2cdt2(P, k, t))
+        if isinstance(t, int):
+            return np.array(bspline_curve_d2cdt2_grid(P, k, t))
+        return np.array(bspline_curve_d2cdt2_tvec(P, k, t))
 
-    def _find_span(self, t: float):
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData3D:
+        xyz = self.evaluate(t)
+        xpypzp = self.dcdt(t)
+        xppyppzpp = self.d2cdt2(t)
+        return PCurveData3D(
+            t=t,
+            x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2],
+            xp=xpypzp[:, 0], yp=xpypzp[:, 1], zp=xpypzp[:, 2],
+            xpp=xppyppzpp[:, 0], ypp=xppyppzpp[:, 1], zpp=xppyppzpp[:, 2]
+        )
+
+
+class NURBSCurve3D(PCurve3D):
+    """Three-dimensional Non-Uniform Rational B-Spline (NURBS) curve class"""
+    def __init__(self,
+                 control_points: typing.List[Point3D] or np.ndarray,
+                 weights: np.ndarray,
+                 knot_vector: np.ndarray,
+                 degree: int):
         """
-        Find the knot span index
+        Non-uniform rational B-spline (NURBS) curve class
+
+        .. warning::
+
+            Need to make degree a get-only property and not a parameter in the ``__init__``
+
+        Parameters
+        ----------
+        control_points
+        weights
+        knot_vector
         """
-        # insertion_point = bisect.bisect_left(self.non_repeated_knots, t)
-        # return self.possible_spans[insertion_point - 1]
-        for knot_span, knot_span_idx in zip(self.possible_spans, self.possible_span_indices):
-            if knot_span[0] <= t < knot_span[1]:
-                return knot_span_idx
-        if t == self.possible_spans[-1][1]:
-            return self.possible_span_indices[-1]
+        control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
+            control_points, np.ndarray) else control_points
+        assert weights.ndim == 1
+        assert knot_vector.ndim == 1
+        assert len(knot_vector) == len(control_points) + degree + 1
+        assert len(control_points) == len(weights)
+
+        # Negative weight check
+        for weight in weights:
+            if weight < 0:
+                raise NegativeWeightError("All weights must be non-negative")
+
+        self.control_points = control_points
+        self.weights = np.array(weights)
+        self.knot_vector = np.array(knot_vector)
+        self.degree = degree
+
+    def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
+        return aerocaps.iges.curves.RationalBSplineCurveIGES(
+            knots=self.knot_vector,
+            weights=self.weights,
+            control_points_XYZ=self.get_control_point_array(),
+            degree=self.degree
+        )
+
+    def reverse(self) -> "NURBSCurve3D":
+        return self.__class__(np.flipud(self.get_control_point_array()),
+                              self.weights[::-1],
+                              (1.0 - self.knot_vector)[::-1],
+                              self.degree)
+
+    def get_control_point_array(self, unit: str = "m") -> np.ndarray:
+        r"""
+        Gets an array representation of the control points
+
+        Parameters
+        ----------
+        unit: str
+            Physical length unit used to determine the output array. Default: ``"m"``
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n+1)\times 3` where :math:`n` is the curve degree
+        """
+        return np.array([p.as_array(unit=unit) for p in self.control_points])
+
+    def get_homogeneous_control_points(self) -> np.ndarray:
+        r"""
+        Gets the array of control points in homogeneous coordinates, :math:`\mathbf{P}_i \cdot w_i`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n + 1) \times 4`, where :math:`n` is the curve degree. The four columns, in order,
+            represent the :math:`x`-coordinate, :math:`y`-coordinate, :math:`z`-coordinate, and weight of each
+            control point.
+        """
+        return np.column_stack((
+            self.get_control_point_array() * np.repeat(self.weights[:, np.newaxis], 3, axis=1),
+            self.weights
+        ))
+
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        w = self.weights
+        k = self.knot_vector
+        if isinstance(t, float):
+            return np.array(nurbs_curve_eval(P, w, k, t))
+        if isinstance(t, int):
+            return np.array(nurbs_curve_eval_grid(P, w, k, t))
+        return np.array(nurbs_curve_eval_tvec(P, w, k, t))
+
+    def evaluate_point3d(self, t: float or int or np.ndarray) -> Point3D or typing.List[Point3D]:
+        curve = self.evaluate(t)
+        if curve.ndim == 1:
+            return Point3D.from_array(curve)
+        return [Point3D.from_array(curve_point) for curve_point in curve]
+
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        w = self.weights
+        k = self.knot_vector
+        if isinstance(t, float):
+            return np.array(nurbs_curve_dcdt(P, w, k, t))
+        if isinstance(t, int):
+            return np.array(nurbs_curve_dcdt_grid(P, w, k, t))
+        return np.array(nurbs_curve_dcdt_tvec(P, w, k, t))
+
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        w = self.weights
+        k = self.knot_vector
+        if isinstance(t, float):
+            return np.array(nurbs_curve_d2cdt2(P, w, k, t))
+        if isinstance(t, int):
+            return np.array(nurbs_curve_d2cdt2_grid(P, w, k, t))
+        return np.array(nurbs_curve_d2cdt2_tvec(P, w, k, t))
+
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData3D:
+        xyz = self.evaluate(t)
+        xpypzp = self.dcdt(t)
+        xppyppzpp = self.d2cdt2(t)
+        return PCurveData3D(
+            t=t,
+            x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2],
+            xp=xpypzp[:, 0], yp=xpypzp[:, 1], zp=xpypzp[:, 2],
+            xpp=xppyppzpp[:, 0], ypp=xppyppzpp[:, 1], zpp=xppyppzpp[:, 2]
+        )
 
 
 class CompositeCurve3D(Geometry3D):
@@ -1799,7 +2223,7 @@ class CurveOnParametricSurface(Geometry3D):
 
 
 def main():
-    bspline = BSpline3D(np.array([
+    bspline = BSplineCurve3D(np.array([
         [1.0, 0.05, 0.0],
         [0.8, 0.12, 0.0],
         [0.6, 0.2, 0.0],
@@ -1813,8 +2237,9 @@ def main():
         degree=3
     )
     data = bspline.evaluate(np.linspace(0.0, 1.0, 301))
+    p = bspline.get_control_point_array()
     plt.plot(data[:, 0], data[:, 1], color="steelblue")
-    plt.plot(bspline.control_points[:, 0], bspline.control_points[:, 1], ls=":", color="grey", marker="o", mec="steelblue", mfc="none")
+    plt.plot(p[:, 0], p[:, 1], ls=":", color="grey", marker="o", mec="steelblue", mfc="none")
     plt.plot([data[75, 0], data[150, 0], data[225, 0]], [data[75, 1], data[150, 1], data[225, 1]], ls="none", marker="o", mfc="indianred", mec="indianred")
     plt.show()
 

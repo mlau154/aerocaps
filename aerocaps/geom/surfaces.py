@@ -15,7 +15,7 @@ import aerocaps.iges.surfaces
 from rust_nurbs import *
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
 from aerocaps.geom.point import Point3D
-from aerocaps.geom.curves import Bezier3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSpline3D
+from aerocaps.geom.curves import BezierCurve3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSplineCurve3D
 from aerocaps.geom.plane import Plane
 from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis, add_vector_to_point
 from aerocaps.geom.vector import Vector3D
@@ -166,7 +166,7 @@ class BezierSurface(Surface):
         return np.array([np.array([p.as_array() for p in p_arr]) for p_arr in self.points])
 
     @classmethod
-    def from_curve_extrude(cls, curve: Bezier3D, distance: Length, extrude_axis: Vector3D = None,
+    def from_curve_extrude(cls, curve: BezierCurve3D, distance: Length, extrude_axis: Vector3D = None,
                            symmetric: bool = False, reverse: bool = False):
         """
         Creates a Bézier surface by extruding a Bézier curve along an axis.
@@ -177,7 +177,7 @@ class BezierSurface(Surface):
 
         Parameters
         ----------
-        curve: Bezier3D
+        curve: BezierCurve3D
             Curve to extrude. The most common use case is a planar curve, but this is not required.
         distance: Length
             Distance along the axis to extrude
@@ -735,7 +735,7 @@ class BezierSurface(Surface):
         P = self.get_control_point_array()
         return np.array(bezier_surf_eval_uvvecs(P, u, v))
 
-    def extract_edge_curve(self, surface_edge: SurfaceEdge) -> Bezier3D:
+    def extract_edge_curve(self, surface_edge: SurfaceEdge) -> BezierCurve3D:
         """
         Extracts the control points from one of the four edges of the Bézier surface and outputs a Bézier curve with
         these control points
@@ -747,19 +747,19 @@ class BezierSurface(Surface):
 
         Returns
         -------
-        Bezier3D
+        BezierCurve3D
             Bézier curve with control points corresponding to the control points along the edge of the surface
         """
         P = self.get_control_point_array()
 
         if surface_edge == SurfaceEdge.u0:
-            return Bezier3D.generate_from_array(P[0, :, :])
+            return BezierCurve3D.generate_from_array(P[0, :, :])
         if surface_edge == SurfaceEdge.u1:
-            return Bezier3D.generate_from_array(P[-1, :, :])
+            return BezierCurve3D.generate_from_array(P[-1, :, :])
         if surface_edge == SurfaceEdge.v0:
-            return Bezier3D.generate_from_array(P[:, 0, :])
+            return BezierCurve3D.generate_from_array(P[:, 0, :])
         if surface_edge == SurfaceEdge.v1:
-            return Bezier3D.generate_from_array(P[:, -1, :])
+            return BezierCurve3D.generate_from_array(P[:, -1, :])
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
 
@@ -1636,13 +1636,13 @@ class RationalBezierSurface(Surface):
         return RationalBezierSurface(new_P, new_w)
 
     @classmethod
-    def from_bezier_revolve(cls, bezier: Bezier3D, axis: Line3D, start_angle: Angle, end_angle: Angle):
+    def from_bezier_revolve(cls, bezier: BezierCurve3D, axis: Line3D, start_angle: Angle, end_angle: Angle):
         """
         Creates a rational Bézier surface from the revolution of a Bézier curve about an axis.
 
         Parameters
         ----------
-        bezier: Bezier3D
+        bezier: BezierCurve3D
             Bézier curve to revolve
         axis: Line3D
             Axis of revolution
@@ -1714,10 +1714,10 @@ class RationalBezierSurface(Surface):
         return cls(control_points, weights)
 
     @staticmethod
-    def fill_surface_from_four_boundaries(left_curve: Bezier3D or RationalBezierCurve3D,
-                                          right_curve: Bezier3D or RationalBezierCurve3D,
-                                          top_curve: Bezier3D or RationalBezierCurve3D,
-                                          bottom_curve: Bezier3D or RationalBezierCurve3D) -> "RationalBezierSurface":
+    def fill_surface_from_four_boundaries(left_curve: BezierCurve3D or RationalBezierCurve3D,
+                                          right_curve: BezierCurve3D or RationalBezierCurve3D,
+                                          top_curve: BezierCurve3D or RationalBezierCurve3D,
+                                          bottom_curve: BezierCurve3D or RationalBezierCurve3D) -> "RationalBezierSurface":
         """
         Creates a fill surface from four boundary curves by linearly interpolating the ``left_curve`` and
         ``right_curve`` and displacing the edges created by the interpolation to form the ``top_curve``
@@ -1736,7 +1736,7 @@ class RationalBezierSurface(Surface):
 
         Parameters
         ----------
-        left_curve: Bezier3D or RationalBezierCurve3D
+        left_curve: BezierCurve3D or RationalBezierCurve3D
             Left boundary curve
         right_curve: Bezier3D or RationalBezierCurve3D
             Right boundary curve
@@ -1751,13 +1751,13 @@ class RationalBezierSurface(Surface):
             Fill surface
         """
         # Convert the boundary curves to rational Bézier curves if they are non-rational
-        if isinstance(left_curve, Bezier3D):
+        if isinstance(left_curve, BezierCurve3D):
             left_curve = left_curve.to_rational_bezier_curve()
-        if isinstance(right_curve, Bezier3D):
+        if isinstance(right_curve, BezierCurve3D):
             right_curve = right_curve.to_rational_bezier_curve()
-        if isinstance(top_curve, Bezier3D):
+        if isinstance(top_curve, BezierCurve3D):
             top_curve = top_curve.to_rational_bezier_curve()
-        if isinstance(bottom_curve, Bezier3D):
+        if isinstance(bottom_curve, BezierCurve3D):
             bottom_curve = bottom_curve.to_rational_bezier_curve()
 
         # Ensure the boundary curve loop is closed
@@ -3509,7 +3509,7 @@ class BSplineSurface(Surface):
         else:
             raise ValueError("Invalid surface_edge value")
 
-    def extract_edge_curve(self, surface_edge: SurfaceEdge) -> BSpline3D:
+    def extract_edge_curve(self, surface_edge: SurfaceEdge) -> BSplineCurve3D:
         """
         Extracts the control points, weights, and knots from one of the four edges of the B-spline surface and
         outputs a B-spline curve with these control points and weights
@@ -3521,20 +3521,20 @@ class BSplineSurface(Surface):
 
         Returns
         -------
-        BSpline3D
+        BSplineCurve3D
             B-spline curve with control points and knots corresponding to the control points and knots
             along the edge of the surface
         """
         P = self.get_control_point_array()
 
         if surface_edge == SurfaceEdge.u0:
-            return BSpline3D(P[0, :, :], self.knots_v, self.degree_v)
+            return BSplineCurve3D(P[0, :, :], self.knots_v, self.degree_v)
         if surface_edge == SurfaceEdge.u1:
-            return BSpline3D(P[-1, :, :], self.knots_v, self.degree_v)
+            return BSplineCurve3D(P[-1, :, :], self.knots_v, self.degree_v)
         if surface_edge == SurfaceEdge.v0:
-            return BSpline3D(P[:, 0, :], self.knots_u, self.degree_u)
+            return BSplineCurve3D(P[:, 0, :], self.knots_u, self.degree_u)
         if surface_edge == SurfaceEdge.v1:
-            return BSpline3D(P[:, -1, :], self.knots_u, self.degree_u)
+            return BSplineCurve3D(P[:, -1, :], self.knots_u, self.degree_u)
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
 
@@ -4307,14 +4307,14 @@ class NURBSSurface(Surface):
         ))
 
     @classmethod
-    def from_bezier_revolve(cls, bezier: Bezier3D, axis: Line3D,
+    def from_bezier_revolve(cls, bezier: BezierCurve3D, axis: Line3D,
                             start_angle: Angle, end_angle: Angle) -> "NURBSSurface":
         """
         Creates a NURBS surface from the revolution of a Bézier curve about an axis.
 
         Parameters
         ----------
-        bezier: Bezier3D
+        bezier: BezierCurve3D
             Bézier curve to revolve
         axis: Line3D
             Axis of revolution

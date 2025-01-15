@@ -5,7 +5,7 @@ import numpy as np
 import aerocaps as ac
 
 
-def fill_surface_four_sided() -> (ac.RationalBezierSurface, typing.List[ac.Bezier3D or ac.RationalBezierCurve3D]):
+def fill_surface_four_sided() -> (ac.RationalBezierSurface, typing.List[ac.BezierCurve3D or ac.RationalBezierCurve3D]):
     """
     Creates a four-sided fill surface from a combination of rational and non-rational Bézier curves.
 
@@ -28,13 +28,13 @@ def fill_surface_four_sided() -> (ac.RationalBezierSurface, typing.List[ac.Bezie
         ]),
         np.array([1.0, 0.7, 1.0])
     )
-    right_curve = ac.Bezier3D.generate_from_array(
+    right_curve = ac.BezierCurve3D.generate_from_array(
         np.array([
             [2.0, 0.1, 0.0],
             [2.1, 0.9, 0.0]
         ])
     )
-    top_curve = ac.Bezier3D.generate_from_array(
+    top_curve = ac.BezierCurve3D.generate_from_array(
         np.array([
             left_curve.control_points[-1].as_array(),
             [0.5, 1.2, 0.0],
@@ -42,7 +42,7 @@ def fill_surface_four_sided() -> (ac.RationalBezierSurface, typing.List[ac.Bezie
             right_curve.control_points[-1].as_array()
         ])
     )
-    bottom_curve = ac.Bezier3D.generate_from_array(
+    bottom_curve = ac.BezierCurve3D.generate_from_array(
         np.array([
             left_curve.control_points[0].as_array(),
             [1.2, 0.2, 0.0],
