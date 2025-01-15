@@ -4740,12 +4740,14 @@ class NURBSSurface(Surface):
         raise ValueError(f"Invalid surface edge {surface_edge}")
     
     def is_clamped(self,surface_edge:SurfaceEdge):
-        Edge=self.extract_edge_curve(surface_edge)
-        p=Edge.degree
-        knot=Edge.knot_vector
-        Start_val=knot[0]
-        End_val=knot[-1]
-        assert (knot[:(p+1)]==Start_val and knot[-(p+1):]==End_val)
+        p=self.get_perpendicular_degree(surface_edge)
+        knot=self.get_perpendicular_knots(surface_edge)
+        if (surface_edge==SurfaceEdge.u0 or surface_edge==SurfaceEdge.v0):
+            Start_val=knot[0]
+            assert (np.all(knot[:(p+1)]==Start_val))
+        elif(surface_edge==SurfaceEdge.u1 or surface_edge==SurfaceEdge.v1):
+            end_val=knot[-1]
+            assert (np.all(knot[:-(p+1)]==end_val))
     
     @staticmethod
     def _cast_uv(u: float or np.ndarray, v: float or np.ndarray) -> (float, float) or (np.ndarray, np.ndarray):
