@@ -753,13 +753,13 @@ class BezierSurface(Surface):
         P = self.get_control_point_array()
 
         if surface_edge == SurfaceEdge.u0:
-            return BezierCurve3D.generate_from_array(P[0, :, :])
+            return BezierCurve3D(P[0, :, :])
         if surface_edge == SurfaceEdge.u1:
-            return BezierCurve3D.generate_from_array(P[-1, :, :])
+            return BezierCurve3D(P[-1, :, :])
         if surface_edge == SurfaceEdge.v0:
-            return BezierCurve3D.generate_from_array(P[:, 0, :])
+            return BezierCurve3D(P[:, 0, :])
         if surface_edge == SurfaceEdge.v1:
-            return BezierCurve3D.generate_from_array(P[:, -1, :])
+            return BezierCurve3D(P[:, -1, :])
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
 
@@ -1938,13 +1938,13 @@ class RationalBezierSurface(Surface):
         w = self.weights
 
         if surface_edge == SurfaceEdge.u0:
-            return RationalBezierCurve3D.generate_from_array(P[0, :, :], w[0, :])
+            return RationalBezierCurve3D(P[0, :, :], w[0, :])
         if surface_edge == SurfaceEdge.u1:
-            return RationalBezierCurve3D.generate_from_array(P[-1, :, :], w[-1, :])
+            return RationalBezierCurve3D(P[-1, :, :], w[-1, :])
         if surface_edge == SurfaceEdge.v0:
-            return RationalBezierCurve3D.generate_from_array(P[:, 0, :], w[:, 0])
+            return RationalBezierCurve3D(P[:, 0, :], w[:, 0])
         if surface_edge == SurfaceEdge.v1:
-            return RationalBezierCurve3D.generate_from_array(P[:, -1, :], w[:, -1])
+            return RationalBezierCurve3D(P[:, -1, :], w[:, -1])
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
 

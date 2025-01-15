@@ -452,7 +452,7 @@ class PCurveData3D:
             B_cross = np.cross(rp_vec, rpp_vec)
             B = B_cross / np.linalg.norm(B_cross)  # Normalized bi-normal vector
         # Handle the case where the curvature is zero
-        for t_idx in range(len(t)):
+        for t_idx in range(len(self.t)):
             if not np.isinf(B[t_idx][0]):
                 continue
             B[t_idx][0] = T[t_idx][0] + 0.5
@@ -842,9 +842,9 @@ class Line3D(PCurve3D):
         t = self._validate_and_convert_t(t)
 
         if self.theta:
-            x = self.p0.x + self.d * np.cos(self.phi.rad) * np.cos(self.theta.rad) * t,
-            y = self.p0.y + self.d * np.cos(self.phi.rad) * np.sin(self.theta.rad) * t,
-            z = self.p0.z + self.d * np.sin(self.phi.rad) * t
+            x = self.p0.x.m + self.d.m * np.cos(self.phi.rad) * np.cos(self.theta.rad) * t
+            y = self.p0.y.m + self.d.m * np.cos(self.phi.rad) * np.sin(self.theta.rad) * t
+            z = self.p0.z.m + self.d.m * np.sin(self.phi.rad) * t
         else:
             x = self.p0.x.m + t * (self.p1.x.m - self.p0.x.m)
             y = self.p0.y.m + t * (self.p1.y.m - self.p0.y.m)
@@ -1244,7 +1244,7 @@ class BezierCurve2D(PCurve2D):
             Transformed curve
         """
         transformation = Transformation2D(**transformation_kwargs)
-        return BezierCurve2D.generate_from_array(transformation.transform(self.get_control_point_array()))
+        return BezierCurve2D(transformation.transform(self.get_control_point_array()))
 
     def elevate_degree(self) -> "BezierCurve2D":
         """
@@ -1533,7 +1533,7 @@ class BezierCurve3D(PCurve3D):
             Transformed curve
         """
         transformation = Transformation3D(**transformation_kwargs)
-        return BezierCurve3D.generate_from_array(transformation.transform(self.get_control_point_array()))
+        return BezierCurve3D(transformation.transform(self.get_control_point_array()))
 
     def elevate_degree(self) -> "BezierCurve3D":
         """
@@ -1559,7 +1559,7 @@ class BezierCurve3D(PCurve3D):
         for i in range(1, n + 1):  # 1 <= i <= n
             new_control_points[i, :] = i / (n + 1) * P[i - 1, :] + (1 - i / (n + 1)) * P[i, :]
 
-        return BezierCurve3D.generate_from_array(new_control_points)
+        return BezierCurve3D(new_control_points)
 
     def split(self, t_split: float) -> ("BezierCurve3D", "BezierCurve3D"):
         r"""
@@ -1726,7 +1726,7 @@ class RationalBezierCurve3D(PCurve3D):
         new_weights = new_homogeneous_control_points[:, -1]
         new_control_points = new_homogeneous_control_points[:, :-1] / np.repeat(new_weights[:, np.newaxis], 3, axis=1)
 
-        return RationalBezierCurve3D.generate_from_array(new_control_points, new_weights)
+        return RationalBezierCurve3D(new_control_points, new_weights)
 
     def get_control_point_array(self, unit: str = "m") -> np.ndarray:
         r"""
