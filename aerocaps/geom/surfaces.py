@@ -4744,10 +4744,16 @@ class NURBSSurface(Surface):
         knot=self.get_perpendicular_knots(surface_edge)
         if (surface_edge==SurfaceEdge.u0 or surface_edge==SurfaceEdge.v0):
             Start_val=knot[0]
-            assert (np.all(knot[:(p+1)]==Start_val))
+            if (np.all(knot[:(p+1)]==Start_val)):
+                return True
+            else:
+                return False
         elif(surface_edge==SurfaceEdge.u1 or surface_edge==SurfaceEdge.v1):
             end_val=knot[-1]
-            assert (np.all(knot[:-(p+1)]==end_val))
+            if (np.all(knot[:-(p+1)]==end_val)):
+                return True
+            else:
+                return False
     
     @staticmethod
     def _cast_uv(u: float or np.ndarray, v: float or np.ndarray) -> (float, float) or (np.ndarray, np.ndarray):
@@ -4756,52 +4762,7 @@ class NURBSSurface(Surface):
         if not isinstance(v, np.ndarray):
             v = np.array([v])
     
-    def dSdu(self, u: float or np.ndarray, v: float or np.ndarray):
-        # control_points=self.control_points,
-        #     knots_u=self.knots_u,
-        #     knots_v=self.knots_v,
-        #     weights=self.weights,
-        #     degree_u=self.degree_u,
-        #     degree_v=self.degree_v
-
-        #  _cox_de_boor(self, t: float, i: int, p: int, knot_vector: np.ndarray,
-        #              possible_spans_u_or_v: np.ndarray, possible_span_indices_u_or_v: np.ndarray) -> float:
-        # def _get_possible_spans(knot_vector) -> (np.ndarray, np.ndarray):
     
-        n, m = self.degree_u, self.degree_v
-    
-        P = self.control_points
-        u, v = self._cast_uv(u, v)
-        possible_spans_u,possible_span_indices_u=self._get_possible_spans(self.knots_u)
-        possible_spans_v,possible_span_indices_v=self._get_possible_spans(self.knots_v)
-        if isinstance(u, np.ndarray):
-            assert u.shape == v.shape
-        
-
-        weight_arr = np.array([[self._cox_de_boor(u,i,n,possible_spans_u,possible_span_indices_u) * self._cox_de_boor(v, j, m, possible_spans_v,possible_span_indices_v) * self.weights[i, j]
-                                for j in range(m + 1)] for i in range(n + 1)])
-        weight_sum = weight_arr.reshape(-1, weight_arr.shape[-1]).sum(axis=0)
-
-        point_arr = np.array([[np.array([(self._cox_de_boor(u,i,n,possible_spans_u,possible_span_indices_u) * self._cox_de_boor(v, j, m, possible_spans_v,possible_span_indices_v) *
-                                          self.weights[i, j])]).T @ np.array([P[i, j, :]])
-                               for j in range(m + 1)] for i in range(n + 1)])
-        point_sum = point_arr.reshape(-1, len(u), 3).sum(axis=0)
-
-        point_arr_deriv = np.array([[np.array([(((1/(self.knots_u[i+n]-self.knots_u[i]))*self._cox_de_boor(u,i,n-1,possible_spans_u,possible_span_indices_u) - (1/(self.knots_u[i+n+1]-self.knots_u[i+1]))*self._cox_de_boor(u,i+1,n-1,possible_spans_u,possible_span_indices_u)) *
-                                                self._cox_de_boor(v, j, m, possible_spans_v,possible_span_indices_v) * self.weights[i, j])]).T @
-                                     np.array([P[i, j, :]]) for j in range(m + 1)] for i in range(n + 1)])
-        point_deriv_sum = point_arr_deriv.reshape(-1, len(u), 3).sum(axis=0)
-
-        weight_arr_deriv = np.array([[ ((1/(self.knots_u[i+n]-self.knots_u[i]))*self._cox_de_boor(u,i,n-1,possible_spans_u,possible_span_indices_u) - (1/(self.knots_u[i+n+1]-self.knots_u[i+1]))*self._cox_de_boor(u,i+1,n-1,possible_spans_u,possible_span_indices_u)) *
-                                      self._cox_de_boor(v, j, m, possible_spans_v,possible_span_indices_v)* self.weights[i, j]
-                                      for j in range(m + 1)] for i in range(n + 1)])
-        weight_deriv_sum = weight_arr_deriv.reshape(-1, weight_arr_deriv.shape[-1]).sum(axis=0)
-
-        A = n * np.tile(weight_sum, (3, 1)).T * point_deriv_sum
-        B = n * point_sum * np.tile(weight_deriv_sum, (3, 1)).T
-        W = np.tile(weight_sum ** 2, (3, 1)).T
-
-        return (A - B) / W
 
     def enforce_g0(self, other: "NURBSSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
@@ -4841,9 +4802,12 @@ class NURBSSurface(Surface):
         other_parallel_degree = other.get_parallel_degree(other_surface_edge)
 
         # Check clamped for self:
-        self.is_clamped(surface_edge)
+        if not self.is_clamped(surface_edge):
+            raise ValueError(" The self surface is not clamped on the edge that has to be stitched")
+
         #Check clamped for other:
-        other.is_clamped(other_surface_edge)
+        if not other.is_clamped(other_surface_edge):
+            raise ValueError(" The self surface is not clamped on the edge that has to be stitched")
 
         if len(self_parallel_knots) != len(other_parallel_knots):
             raise ValueError(f"Length of the knot vector parallel to the edge of the input surface "
