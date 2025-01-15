@@ -1392,7 +1392,7 @@ class BezierSurface(Surface):
 
         return points, lines
 
-    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs):
+    def plot_surface(self, plot: pv.Plotter, Nu: int = 50, Nv: int = 50, **mesh_kwargs) -> pv.StructuredGrid:
         """
         Plots the Bézier surface using the `pyvista <https://pyvista.org/>`_ library
 
@@ -1418,7 +1418,7 @@ class BezierSurface(Surface):
 
         return grid
 
-    def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+    def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs) -> pv.Actor:
         """
         Plots the network of lines connecting the Bézier surface control points using the
         `pyvista <https://pyvista.org/>`_ library
@@ -1429,13 +1429,19 @@ class BezierSurface(Surface):
             :obj:`pyvista.Plotter` instance
         line_kwargs:
             Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+
+        Returns
+        -------
+        pv.Actor
+            The lines actor
         """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
-        plot.add_lines(line_arr, **line_kwargs)
+        line_actor = plot.add_lines(line_arr, **line_kwargs)
+        return line_actor
 
-    def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+    def plot_control_points(self, plot: pv.Plotter, **point_kwargs) -> pv.Actor:
         """
         Plots the Bézier surface control points using the `pyvista <https://pyvista.org/>`_ library
 
@@ -1445,10 +1451,16 @@ class BezierSurface(Surface):
             :obj:`pyvista.Plotter` instance
         point_kwargs:
             Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+
+        Returns
+        -------
+        pv.Actor
+            The points actor
         """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
-        plot.add_points(point_arr, **point_kwargs)
+        point_actor = plot.add_points(point_arr, **point_kwargs)
+        return point_actor
 
 
 class RationalBezierSurface(Surface):
@@ -3098,7 +3110,7 @@ class RationalBezierSurface(Surface):
         plot.add_mesh(grid, **mesh_kwargs)
         return grid
 
-    def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+    def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs) -> pv.Actor:
         """
         Plots the network of lines connecting the rational Bézier surface control points using the
         `pyvista <https://pyvista.org/>`_ library
@@ -3109,13 +3121,19 @@ class RationalBezierSurface(Surface):
             :obj:`pyvista.Plotter` instance
         line_kwargs:
             Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+
+        Returns
+        -------
+        pv.Actor
+            The lines actor
         """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
-        plot.add_lines(line_arr, **line_kwargs)
+        line_actor = plot.add_lines(line_arr, **line_kwargs)
+        return line_actor
 
-    def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+    def plot_control_points(self, plot: pv.Plotter, **point_kwargs) -> pv.Actor:
         """
         Plots the rational Bézier surface control points using the `pyvista <https://pyvista.org/>`_ library
 
@@ -3125,11 +3143,16 @@ class RationalBezierSurface(Surface):
             :obj:`pyvista.Plotter` instance
         point_kwargs:
             Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+
+        Returns
+        -------
+        pv.Actor
+            The points actor
         """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
-        plot.add_points(point_arr, **point_kwargs)
-
+        point_actor = plot.add_points(point_arr, **point_kwargs)
+        return point_actor
 
 class BSplineSurface(Surface):
     """
@@ -4124,7 +4147,7 @@ class BSplineSurface(Surface):
         plot.add_mesh(grid, **mesh_kwargs)
         return grid
 
-    def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+    def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs) -> pv.Actor:
         """
         Plots the network of lines connecting the B-spline surface control points using the
         `pyvista <https://pyvista.org/>`_ library
@@ -4135,13 +4158,19 @@ class BSplineSurface(Surface):
             :obj:`pyvista.Plotter` instance
         line_kwargs:
             Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+
+        Returns
+        -------
+        pv.Actor
+            The lines actor
         """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
-        plot.add_lines(line_arr, **line_kwargs)
+        line_actor = plot.add_lines(line_arr, **line_kwargs)
+        return line_actor
 
-    def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+    def plot_control_points(self, plot: pv.Plotter, **point_kwargs) -> pv.Actor:
         """
         Plots the B-spline surface control points using the `pyvista <https://pyvista.org/>`_ library
 
@@ -4151,10 +4180,16 @@ class BSplineSurface(Surface):
             :obj:`pyvista.Plotter` instance
         point_kwargs:
             Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+
+        Returns
+        -------
+        pv.Actor
+            The points actor
         """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
-        plot.add_points(point_arr, **point_kwargs)
+        point_actor = plot.add_points(point_arr, **point_kwargs)
+        return point_actor
 
 
 class NURBSSurface(Surface):
@@ -5386,7 +5421,7 @@ class NURBSSurface(Surface):
         plot.add_mesh(grid, **mesh_kwargs)
         return grid
 
-    def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs):
+    def plot_control_point_mesh_lines(self, plot: pv.Plotter, **line_kwargs) -> pv.Actor:
         """
         Plots the network of lines connecting the NURBS surface control points using the
         `pyvista <https://pyvista.org/>`_ library
@@ -5397,13 +5432,19 @@ class NURBSSurface(Surface):
             :obj:`pyvista.Plotter` instance
         line_kwargs:
             Keyword arguments to pass to the :obj:`pyvista.Plotter.add_lines`
+
+        Returns
+        -------
+        pv.Actor
+            The lines actor
         """
         _, line_objs = self.generate_control_point_net()
         line_arr = np.array([[line_obj.p0.as_array(), line_obj.p1.as_array()] for line_obj in line_objs])
         line_arr = line_arr.reshape((len(line_objs) * 2, 3))
-        plot.add_lines(line_arr, **line_kwargs)
+        line_actor = plot.add_lines(line_arr, **line_kwargs)
+        return line_actor
 
-    def plot_control_points(self, plot: pv.Plotter, **point_kwargs):
+    def plot_control_points(self, plot: pv.Plotter, **point_kwargs) -> pv.Actor:
         """
         Plots the NURBS surface control points using the `pyvista <https://pyvista.org/>`_ library
 
@@ -5413,10 +5454,16 @@ class NURBSSurface(Surface):
             :obj:`pyvista.Plotter` instance
         point_kwargs:
             Keyword arguments to pass to the :obj:`pyvista.Plotter.add_points`
+
+        Returns
+        -------
+        pv.Actor
+            The points actor
         """
         point_objs, _ = self.generate_control_point_net()
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
-        plot.add_points(point_arr, **point_kwargs)
+        point_actor = plot.add_points(point_arr, **point_kwargs)
+        return point_actor
 
 
 class TrimmedSurface(Surface):
