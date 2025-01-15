@@ -4883,11 +4883,6 @@ class NURBSSurface(Surface):
         """
         self.enforce_g0(other, surface_edge, other_surface_edge)
 
-        # Check clamped for self:
-        self.is_clamped(surface_edge)
-        #Check clamped for other:
-        other.is_clamped(other_surface_edge)
-
         n_ratio = other.get_perpendicular_degree(other_surface_edge) / self.get_perpendicular_degree(surface_edge)
         for row_index in range(self.get_parallel_control_point_length(surface_edge)):
 
@@ -4966,10 +4961,6 @@ class NURBSSurface(Surface):
             Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
             of the current surface
         """
-        # Check clamped for self:
-        self.is_clamped(surface_edge)
-        #Check clamped for other:
-        other.is_clamped(other_surface_edge)
         
         self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
         n_ratio = (other.get_perpendicular_degree(other_surface_edge) ** 2 -
