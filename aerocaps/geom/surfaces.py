@@ -3302,6 +3302,10 @@ class RationalBezierSurface(Surface):
         point_actor = plot.add_points(point_arr, **point_kwargs)
         return point_actor
 
+    def __repr__(self):
+        return (f"{self.name}: {self.degree_u} x {self.degree_v} {self.__class__.__name__} "
+                f"({self.degree_u + 1} x {self.degree_v + 1} control points)")
+
 
 class BSplineSurface(Surface):
     """
@@ -4356,6 +4360,10 @@ class BSplineSurface(Surface):
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
         point_actor = plot.add_points(point_arr, **point_kwargs)
         return point_actor
+
+    def __repr__(self):
+        return (f"{self.name}: {self.degree_u} x {self.degree_v} {self.__class__.__name__} "
+                f"({self.n_points_u} x {self.n_points_v} control points)")
 
 
 class NURBSSurface(Surface):
@@ -5788,6 +5796,10 @@ class NURBSSurface(Surface):
         point_arr = np.array([point_obj.as_array() for point_obj in point_objs])
         point_actor = plot.add_points(point_arr, **point_kwargs)
         return point_actor
+
+    def __repr__(self):
+        return (f"{self.name}: {self.degree_u} x {self.degree_v} {self.__class__.__name__} "
+                f"({self.n_points_u} x {self.n_points_v} control points)")
 
 
 class TrimmedSurface(Surface):
