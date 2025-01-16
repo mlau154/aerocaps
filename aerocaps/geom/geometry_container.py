@@ -60,7 +60,7 @@ class GeometryContainer:
             container.plot()
 
             # Export the geometries to an IGES file
-            container.export('curve_and_surf.igs', units='meters')
+            container.export_iges('curve_and_surf.igs', units='meters')
 
             # Remove the curve and surface by different methods
             container.remove_geometry('MyCurve')
