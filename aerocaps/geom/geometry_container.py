@@ -1,3 +1,4 @@
+"""Storage container module"""
 import time
 import typing
 
@@ -5,18 +6,70 @@ import numpy as np
 import pyvista as pv
 
 from aerocaps.geom import Geometry
+from aerocaps.iges.iges_generator import IGESGenerator
 
 __all__ = [
     "GeometryContainer"
 ]
 
-from aerocaps.iges.iges_generator import IGESGenerator
-
 
 class GeometryContainer:
     """Storage container for geometric objects that adds convenience methods for plotting and export"""
     def __init__(self):
-        """Storage container for geometric objects that adds convenience methods for plotting and export"""
+        r"""
+        Storage container for geometric objects that adds convenience methods for plotting and export. The example
+        code below shows how to add a curve and a surface to a new container, plots them in an interactive scene,
+        exports them to IGES, and then removes both of them by varying identifiers:
+
+        .. code-block:: python
+
+            # Create the geometric objects
+            curve = BezierCurve3D(np.array([
+                [0.0, 0.0, 0.0],
+                [0.3, 0.2, 0.1],
+                [0.6, 0.1, 0.3],
+                [1.0, -0.1, 0.2]
+            ]), name='MyCurve')
+            surf = BezierSurface(np.array([
+                [
+                    [0.0, 0.0, 0.0],
+                    [0.3, 0.2, 0.1],
+                    [0.6, 0.1, 0.3],
+                    [1.0, -0.1, 0.2]
+                ],
+                [
+                    [0.0, 0.0, 1.0],
+                    [0.3, 0.4, 1.1],
+                    [0.6, 0.2, 1.3],
+                    [1.0, -0.3, 1.2]
+                ]
+            ]))
+
+            # Instantiate a container
+            container = GeometryContainer()
+
+            # Add the geometries to the container
+            container.add_geometry(point)
+            container.add_geometry(curve)
+
+            # List the geometries inside the container
+            geom_names = container.geometry_name_list()
+            print(f'{geom_names = }')
+
+            # Plot the geometries in an interactive scene
+            container.plot()
+
+            # Export the geometries to an IGES file
+            container.export('curve_and_surf.igs', units='meters')
+
+            # Remove the curve and surface by different methods
+            container.remove_geometry('MyCurve')
+            container.remove_geometry(surf)
+
+            # Show that the container is now empty
+            geom_names = container.geometry_name_list()
+            print(f'{geom_names = }')
+        """
         self._container = dict()
 
     def _get_max_index_associated_with_name(self, name: str) -> int:
