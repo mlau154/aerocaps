@@ -4976,11 +4976,11 @@ class NURBSSurface(Surface):
         knots = self.get_perpendicular_knots(surface_edge)
         if surface_edge in (SurfaceEdge.u0, SurfaceEdge.v0):
             start_knot = knots[0]
-            if np.all(knots[:(p+1)] == start_knot):
+            if np.all(knots[:(p + 1)] == start_knot):
                 return True
             return False
         end_knot = knots[-1]
-        if np.all(knots[:-(p+1)] == end_knot):
+        if np.all(knots[-(p + 1):] == end_knot):
             return True
         return False
 
