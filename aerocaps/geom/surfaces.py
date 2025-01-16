@@ -7,7 +7,7 @@ from enum import Enum
 
 import numpy as np
 import pyvista as pv
-from scipy.optimize import fsolve
+from scipy.optimize import fsolve, minimize
 
 import aerocaps.iges.entity
 import aerocaps.iges.curves
@@ -1121,6 +1121,131 @@ class BezierSurface(Surface):
             of the current surface
         """
         self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
+
+    def enforce_g0g1_multiface(self,
+                               target_surf: "BezierSurface",
+                               f_u0: float = 1.0,
+                               f_u1: float = 1.0,
+                               f_v0: float = 1.0,
+                               f_v1: float = 1.0,
+                               adjacent_surf_u0: "BezierSurface" = None,
+                               adjacent_surf_u1: "BezierSurface" = None,
+                               adjacent_surf_v0: "BezierSurface" = None,
+                               adjacent_surf_v1: "BezierSurface" = None,
+                               other_edge_u0: SurfaceEdge = None,
+                               other_edge_u1: SurfaceEdge = None,
+                               other_edge_v0: SurfaceEdge = None,
+                               other_edge_v1: SurfaceEdge = None,
+                               n_deriv_points: int = 10,
+                               ):
+        adjacent_surfs = (adjacent_surf_u0, adjacent_surf_u1, adjacent_surf_v0, adjacent_surf_v1)
+        other_edges = (other_edge_u0, other_edge_u1, other_edge_v0, other_edge_v1)
+        # Input validation
+        if not any(adjacent_surfs):
+            raise ValueError("Must specify at least one adjacent surface")
+        if not any(other_edges):
+            raise ValueError("Must specify at least one other edge")
+        if len(adjacent_surfs) == 1:
+            raise ValueError("For continuity enforcement with only one other surface, use 'enforce_g0g1' instead")
+        if len(adjacent_surfs) != len(other_edges):
+            raise ValueError("Must specify one 'other_edge' for every 'adjacent_surf'")
+
+        # Create a mapping between the surfaces and edges
+        surf_edge_mapping = {
+            SurfaceEdge.u0: (adjacent_surf_u0, other_edge_u0, f_u0),
+            SurfaceEdge.u1: (adjacent_surf_u1, other_edge_u1, f_u1),
+            SurfaceEdge.v0: (adjacent_surf_v0, other_edge_v0, f_v0),
+            SurfaceEdge.v1: (adjacent_surf_v1, other_edge_v1, f_v1)
+        }
+        for self_edge, other_data in surf_edge_mapping.items():
+            if any(other_data) or all(other_data):
+                continue
+            raise ValueError("Must specify either both an 'adjacent_surf' and an 'other_edge' or neither for every "
+                             "edge of the current surface")
+
+        # Enforce G0 continuity with all surfaces
+        for self_edge in surf_edge_mapping.keys():
+            data = surf_edge_mapping[self_edge]
+            target_surf.enforce_g0(
+                data[0], surface_edge=self_edge, other_surface_edge=data[1]
+            )
+
+        first_derivs_other = {
+            self_edge: data[0].get_first_derivs_along_edge(data[1], n_points=n_deriv_points) if data[0] else None
+            for self_edge, data in surf_edge_mapping.items()
+        }
+
+        def evaluate_f_sign(surf_edge_1: SurfaceEdge, surf_edge_2: SurfaceEdge) -> float:
+            """
+            Evaluates the sign of the tangent proportionality factor across an edge pair
+
+            Parameters
+            ----------
+            surf_edge_1: SurfaceEdge
+                First surface edge
+            surf_edge_2: SurfaceEdge
+                Second surface edge
+
+            Returns
+            -------
+            float
+                ``1.0`` if positive, ``-1.0`` otherwise
+            """
+            surf_edges_0 = (SurfaceEdge.u0, SurfaceEdge.v0)
+            surf_edges_1 = (SurfaceEdge.u1, SurfaceEdge.v1)
+            if surf_edge_1 in surf_edges_0 and surf_edge_2 in surf_edges_0:
+                return -1.0
+            if surf_edge_1 in surf_edges_1 and surf_edge_2 in surf_edges_1:
+                return -1.0
+            return 1.0
+
+        def get_first_derivs_target() -> typing.Dict[SurfaceEdge, np.ndarray]:
+            return {
+                target_edge: target_surf.get_first_derivs_along_edge(target_edge, n_points=n_deriv_points)
+                if data[0] else None for target_edge, data in surf_edge_mapping.items()
+            }
+
+        def get_points_to_update() -> typing.List[Point3D]:
+            """Gets the points in the target surface that will be updated during the optimization"""
+            points_to_update = []
+            for surface_edge, data in surf_edge_mapping.items():
+                degree = self.get_parallel_degree(surface_edge)
+                # Loop through all the points in the second row starting from the second point and ending at the
+                # second-to-last point
+                for row_index in range(1, degree):
+                    point = self.get_point(row_index, continuity_index=1, surface_edge=surface_edge)
+                    if point in points_to_update:
+                        continue
+                    points_to_update.append(point)
+            return points_to_update
+
+        f_signs = {self_edge: evaluate_f_sign(self_edge, data[1]) for self_edge, data in surf_edge_mapping.items()}
+        mod_points = get_points_to_update()
+        x0 = np.array([p.as_array() for p in mod_points]).flatten()
+
+        def obj_fun(x) -> np.ndarray:
+            x_reshaped = x.reshape((len(mod_points), 3))
+            # Update the points in-place
+            for i in range(x_reshaped.shape[0]):
+                mod_points[i].x.m = x_reshaped[i, 0]
+                mod_points[i].y.m = x_reshaped[i, 1]
+                mod_points[i].z.m = x_reshaped[i, 2]
+
+            # Evaluate the new derivatives on the target surface
+            first_derivs_target = get_first_derivs_target()
+
+            # Evaluate the objection function
+            obj_fun_val = 0.0  # This will be cast to a 1-D array
+            for target_edge in surf_edge_mapping.keys():
+                f = surf_edge_mapping[target_edge][2]
+                obj_fun_val += np.sum(
+                    (first_derivs_other[target_edge] - f_signs[target_edge] * 1/f * first_derivs_target[target_edge])**2
+                )
+
+            return obj_fun_val
+
+        res = minimize(obj_fun, x0)
+        print(f"{res = }")
 
     def enforce_g0g1g2(self, other: "BezierSurface", f: float,
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
@@ -2340,13 +2465,6 @@ class RationalBezierSurface(Surface):
             of the current surface
         """
         self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
-
-    def enforce_g0g1_multiface(self, f: float,
-                               adjacent_surf_north: "RationalBezierSurface" = None,
-                               adjacent_surf_south: "RationalBezierSurface" = None,
-                               adjacent_surf_east: "RationalBezierSurface" = None,
-                               adjacent_surf_west: "RationalBezierSurface" = None):
-        pass
 
     def enforce_g0g1g2(self, other: "RationalBezierSurface", f: float or np.ndarray,
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
