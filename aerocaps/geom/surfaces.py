@@ -62,7 +62,10 @@ class BezierSurface(Surface):
     """
     Bézier surface class. A NURBS surface with no internal knots and all weights equal to unity.
     """
-    def __init__(self, points: typing.List[typing.List[Point3D]] or np.ndarray):
+    def __init__(self,
+                 points: typing.List[typing.List[Point3D]] or np.ndarray,
+                 name: str = "BezierSurface",
+                 construction: bool = False):
         r"""
         A Bézier surface is a parametric surface described by a matrix of control points and defined on a rectangular
         domain :math:`\{u \in [0,1], v \in [0,1]\}`. The mathematical expression for the Bézier surface is identical
@@ -127,6 +130,12 @@ class BezierSurface(Surface):
             objects or an :obj:`~numpy.ndarray` of size :math:`(n+1) \times (m+1) \times 3`,
             where :math:`n` is the surface degree in the :math:`u`-parametric direction and :math:`m` is the
             surface degree in the :math:`v`-parametric direction
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'BezierSurface'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
         """
         if isinstance(points, np.ndarray):
             points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
@@ -135,6 +144,7 @@ class BezierSurface(Surface):
         self.degree_v = len(points[0]) - 1
         self.Nu = self.degree_u + 1
         self.Nv = self.degree_v + 1
+        super().__init__(name=name, construction=construction)
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         """
@@ -1586,6 +1596,10 @@ class BezierSurface(Surface):
         point_actor = plot.add_points(point_arr, **point_kwargs)
         return point_actor
 
+    def __repr__(self):
+        return (f"{self.name}: {self.degree_u} x {self.degree_v} {self.__class__.__name__} "
+                f"({self.degree_u + 1} x {self.degree_v + 1} control points)")
+
 
 class RationalBezierSurface(Surface):
     """
@@ -1594,7 +1608,22 @@ class RationalBezierSurface(Surface):
     def __init__(self,
                  points: typing.List[typing.List[Point3D]] or np.ndarray,
                  weights: np.ndarray,
+                 name: str = "RationalBezierSurface",
+                 construction: bool = False
                  ):
+        """
+
+        Parameters
+        ----------
+        points
+        weights
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'RationalBezierSurface'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
         if isinstance(points, np.ndarray):
             points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
         self.points = points
@@ -1623,6 +1652,7 @@ class RationalBezierSurface(Surface):
         self.weights = weights
         self.degree_u = degree_u
         self.degree_v = degree_v
+        super().__init__(name=name, construction=construction)
 
     @property
     def n_points_u(self) -> int:
@@ -3272,6 +3302,7 @@ class RationalBezierSurface(Surface):
         point_actor = plot.add_points(point_arr, **point_kwargs)
         return point_actor
 
+
 class BSplineSurface(Surface):
     """
     B-spline surface class
@@ -3280,7 +3311,23 @@ class BSplineSurface(Surface):
                  points: typing.List[typing.List[Point3D]] or np.ndarray,
                  knots_u: np.ndarray,
                  knots_v: np.ndarray,
+                 name: str = "BSplineSurface",
+                 construction: bool = False
                  ):
+        """
+
+        Parameters
+        ----------
+        points
+        knots_u
+        knots_v
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'BSplineSurface'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
         if isinstance(points, np.ndarray):
             points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
         self.points = points
@@ -3291,6 +3338,7 @@ class BSplineSurface(Surface):
         self.knots_v = knots_v
 
         self._weights = np.ones((len(points), len(points[0])))
+        super().__init__(name=name, construction=construction)
 
     @property
     def n_points_u(self) -> int:
@@ -4319,7 +4367,24 @@ class NURBSSurface(Surface):
                  knots_u: np.ndarray,
                  knots_v: np.ndarray,
                  weights: np.ndarray,
+                 name: str = "NURBSSurface",
+                 construction: bool = False
                  ):
+        """
+
+        Parameters
+        ----------
+        points
+        knots_u
+        knots_v
+        weights
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'NURBSSurface'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
         if isinstance(points, np.ndarray):
             points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
         self.points = points
@@ -4338,6 +4403,7 @@ class NURBSSurface(Surface):
         self.knots_u = knots_u
         self.knots_v = knots_v
         self.weights = weights
+        super().__init__(name=name, construction=construction)
 
     @property
     def n_points_u(self) -> int:
@@ -5728,10 +5794,27 @@ class TrimmedSurface(Surface):
     def __init__(self,
                  untrimmed_surface: Surface,
                  outer_boundary: Geometry3D,
-                 inner_boundaries: typing.List[Geometry3D] = None):
+                 inner_boundaries: typing.List[Geometry3D] = None,
+                 name: str = "TrimmedSurface",
+                 construction: bool = False):
+        """
+
+        Parameters
+        ----------
+        untrimmed_surface
+        outer_boundary
+        inner_boundaries
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
         self.untrimmed_surface = untrimmed_surface
         self.outer_boundary = outer_boundary
         self.inner_boundaries = inner_boundaries
+        super().__init__(name=name, construction=construction)
 
     def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
         raise NotImplementedError("Evaluation not yet implemented for trimmed surfaces")

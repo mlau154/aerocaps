@@ -18,9 +18,25 @@ __all__ = [
 
 
 class Point2D(Geometry2D):
-    def __init__(self, x: Length, y: Length):
+    """Two-dimensional point class"""
+    def __init__(self, x: Length, y: Length, name: str = "Point2D", construction: bool = False):
+        """
+        Two-dimensional point class
+
+        Parameters
+        ----------
+        x: Length
+        y: Length
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'Point2D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
         self.x = x
         self.y = y
+        super().__init__(name=name, construction=construction)
 
     def as_array(self, unit: str = "m"):
         return np.array([getattr(self.x, unit), getattr(self.y, unit)])
@@ -46,10 +62,29 @@ class Point2D(Geometry2D):
 
 
 class Point3D(Geometry3D):
-    def __init__(self, x: Length, y: Length, z: Length):
+    """
+    Three-dimensional point class
+    """
+    def __init__(self, x: Length, y: Length, z: Length, name: str = "Point3D", construction: bool = False):
+        """
+        Three-dimensional point class
+
+        Parameters
+        ----------
+        x: Length
+        y: Length
+        z: Length
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'Point3D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
         self.x = x
         self.y = y
         self.z = z
+        super().__init__(name=name, construction=construction)
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.point.PointIGES(self.as_array())
@@ -94,10 +129,36 @@ class Point3D(Geometry3D):
 
 
 class Origin2D(Point2D):
-    def __init__(self):
-        super().__init__(x=Length(m=0), y=Length(m=0))
+    """Two-dimensional origin point class"""
+    def __init__(self, name: str = "Origin2D", construction: bool = False):
+        """
+        Point located at :math:`(x,y)=(0,0)`
+
+        Parameters
+        ----------
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'Origin2D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
+        super().__init__(x=Length(m=0), y=Length(m=0), name=name, construction=construction)
 
 
 class Origin3D(Point3D):
-    def __init__(self):
-        super().__init__(x=Length(m=0), y=Length(m=0), z=Length(m=0))
+    """Three-dimensional origin point class"""
+    def __init__(self, name: str = "Origin3D", construction: bool = False):
+        """
+        Point located at :math:`(x,y,z)=(0,0,0)`
+
+        Parameters
+        ----------
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'Origin3D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
+        super().__init__(x=Length(m=0), y=Length(m=0), z=Length(m=0), name=name, construction=construction)

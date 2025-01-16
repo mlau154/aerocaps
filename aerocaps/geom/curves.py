@@ -637,7 +637,9 @@ class Line2D(PCurve2D):
                  p0: Point2D,
                  p1: Point2D = None,
                  theta: Angle = None,
-                 d: Length = Length(m=1.0)
+                 d: Length = Length(m=1.0),
+                 name: str = "Line2D",
+                 construction: bool = False
                  ):
         r"""
         Two-dimensional line defined by either two points or a point and an angle. If a second point (``p1``)
@@ -671,6 +673,12 @@ class Line2D(PCurve2D):
         d: Length
             Used in conjunction with ``theta`` to determine the point corresponding to :math:`t=1`. If ``p1`` is
             specified, this value is not used. Default: ``Length(m=1.0)``
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'Line2D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
         """
         if theta and p1:
             raise ValueError("Angle theta should not be specified if p1 is specified")
@@ -682,6 +690,7 @@ class Line2D(PCurve2D):
         self.d = d if not p1 else Length(m=measure_distance_between_points(p0, p1))
         self.p1 = self.evaluate_point2d(1.0) if not p1 else p1
         self.control_points = [self.p0, self.p1]
+        super().__init__(name=name, construction=construction)
 
     def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
         t = self._validate_and_convert_t(t)
@@ -777,8 +786,26 @@ class Line3D(PCurve3D):
                  p1: Point3D = None,
                  theta: Angle = None,
                  phi: Angle = None,
-                 d: Length = Length(m=1.0)
+                 d: Length = Length(m=1.0),
+                 name: str = "Line3D",
+                 construction: bool = False
                  ):
+        """
+
+        Parameters
+        ----------
+        p0
+        p1
+        theta
+        phi
+        d
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'Line3D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
         if (theta and p1) or (phi and p1):
             raise ValueError("Angles should not be specified if p1 is specified")
         if (not theta and not p1) or (not phi and not p1):
@@ -790,6 +817,7 @@ class Line3D(PCurve3D):
         self.d = d if not p1 else Length(m=measure_distance_between_points(p0, p1))
         self.p1 = self.evaluate_point3d(1.0) if not p1 else p1
         self.control_points = [self.p0, self.p1]
+        super().__init__(name=name, construction=construction)
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.curves.LineIGES(self.p0.as_array(), self.p1.as_array())
@@ -952,7 +980,8 @@ class Line3D(PCurve3D):
 class CircularArc2D(PCurve2D):
     """Two-dimensional circular arc class"""
     def __init__(self, center: Point2D, radius: Length, start_point: Point2D = None, end_point: Point2D = None,
-                 start_angle: Angle = None, end_angle: Angle = None, complement: bool = False):
+                 start_angle: Angle = None, end_angle: Angle = None, complement: bool = False,
+                 name: str = "CircularArc2D", construction: bool = False):
         """
         Creates a circular arc object.
 
@@ -979,6 +1008,12 @@ class CircularArc2D(PCurve2D):
             Optional ending angle for the arc. Default: ``None``
         complement: bool
             Whether to output the complement arc. Default: ``False``
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'CircularArc2D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
         """
         if not bool(start_point) ^ bool(start_angle):
             raise ValueError("Must specify a starting point or angle")
@@ -995,6 +1030,7 @@ class CircularArc2D(PCurve2D):
         else:
             self.end_angle = end_angle
         self.complement = complement
+        super().__init__(name=name, construction=construction)
 
     def _map_t_to_angle(self, t: float or np.ndarray) -> float or np.ndarray:
         r"""
@@ -1084,7 +1120,8 @@ class CircularArc2D(PCurve2D):
 
 class BezierCurve2D(PCurve2D):
     """Two-dimensional Bézier curve class"""
-    def __init__(self, control_points: typing.List[Point2D] or np.ndarray):
+    def __init__(self, control_points: typing.List[Point2D] or np.ndarray,
+                 name: str = "BezierCurve2D", construction: bool = False):
         """
         Creates a two-dimensional Bézier curve objects from a list of control points
 
@@ -1092,9 +1129,16 @@ class BezierCurve2D(PCurve2D):
         ----------
         control_points: typing.List[Point2D] or numpy.ndarray
             Control points for the Bézier curve
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'BezierCurve2D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
         """
         self.control_points = [Point2D.from_array(p) for p in control_points] if isinstance(
             control_points, np.ndarray) else control_points
+        super().__init__(name=name, construction=construction)
 
     @property
     def degree(self) -> int:
@@ -1328,7 +1372,8 @@ class BezierCurve2D(PCurve2D):
 
 class BezierCurve3D(PCurve3D):
     """Three-dimensional Bézier curve class"""
-    def __init__(self, control_points: typing.List[Point3D] or np.ndarray):
+    def __init__(self, control_points: typing.List[Point3D] or np.ndarray,
+                 name: str = "BezierCurve3D", construction: bool = False):
         """
         Creates a three-dimensional Bézier curve objects from a list of control points
 
@@ -1336,9 +1381,16 @@ class BezierCurve3D(PCurve3D):
         ----------
         control_points: typing.List[Point3D] or numpy.ndarray
             Control points for the Bézier curve
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'BezierCurve3D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
         """
         self.control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
             control_points, np.ndarray) else control_points
+        super().__init__(name=name, construction=construction)
 
     @property
     def degree(self):
@@ -1634,7 +1686,7 @@ class BezierCurve3D(PCurve3D):
         """
         projection = "XYZ" if projection is None else projection
         t_vec = np.linspace(0.0, 1.0, nt)
-        data = self.evaluate(t_vec).xyz
+        data = self.evaluate(t_vec)
         args = tuple([data[:, _projection_dict[axis]] for axis in projection])
 
         if isinstance(ax, plt.Axes):
@@ -1650,7 +1702,8 @@ class BezierCurve3D(PCurve3D):
 
 class RationalBezierCurve3D(PCurve3D):
     """Three-dimensional rational Bézier curve class"""
-    def __init__(self, control_points: typing.List[Point3D] or np.ndarray, weights: np.ndarray):
+    def __init__(self, control_points: typing.List[Point3D] or np.ndarray, weights: np.ndarray,
+                 name: str = "RationalBezierCurve3D", construction: bool = False):
         """
         Creates a three-dimensional rational Bézier curve objects from a list of control points and weights
 
@@ -1660,6 +1713,12 @@ class RationalBezierCurve3D(PCurve3D):
             Control points for the Bézier curve
         weights: numpy.ndarray
             Weights for the control points. Must have the same length as the control point array
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'RationalBezierCurve3D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
         """
         self.control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
             control_points, np.ndarray) else control_points
@@ -1678,6 +1737,7 @@ class RationalBezierCurve3D(PCurve3D):
         self.degree = len(control_points) - 1
         assert self.knot_vector.ndim == 1
         assert len(self.knot_vector) == len(control_points) + self.degree + 1
+        super().__init__(name=name, construction=construction)
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.curves.RationalBSplineCurveIGES(
@@ -1970,9 +2030,24 @@ class BSplineCurve3D(PCurve3D):
     def __init__(self,
                  control_points: typing.List[Point3D] or np.ndarray,
                  knot_vector: np.ndarray,
-                 degree: int):
+                 degree: int,
+                 name: str = "BSplineCurve3D",
+                 construction: bool = False
+                 ):
         """
         Three-dimensional B-spline curve class
+
+        Parameters
+        ----------
+        control_points
+        knot_vector
+        degree
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'BSplineCurve3D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
         """
         control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
             control_points, np.ndarray) else control_points
@@ -1984,6 +2059,7 @@ class BSplineCurve3D(PCurve3D):
         self.knot_vector = np.array(knot_vector)
         self.weights = np.ones(len(self.control_points))
         self.degree = degree
+        super().__init__(name=name, construction=construction)
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.curves.RationalBSplineCurveIGES(
@@ -2065,7 +2141,9 @@ class NURBSCurve3D(PCurve3D):
                  control_points: typing.List[Point3D] or np.ndarray,
                  weights: np.ndarray,
                  knot_vector: np.ndarray,
-                 degree: int):
+                 degree: int,
+                 name: str = "NURBSCurve3D",
+                 construction: bool = False):
         """
         Non-uniform rational B-spline (NURBS) curve class
 
@@ -2078,6 +2156,12 @@ class NURBSCurve3D(PCurve3D):
         control_points
         weights
         knot_vector
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'NURBSCurve3D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
         """
         control_points = [Point3D.from_array(p) for p in control_points] if isinstance(
             control_points, np.ndarray) else control_points
@@ -2095,6 +2179,7 @@ class NURBSCurve3D(PCurve3D):
         self.weights = np.array(weights)
         self.knot_vector = np.array(knot_vector)
         self.degree = degree
+        super().__init__(name=name, construction=construction)
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         return aerocaps.iges.curves.RationalBSplineCurveIGES(
@@ -2191,8 +2276,22 @@ class NURBSCurve3D(PCurve3D):
 
 
 class CompositeCurve3D(Geometry3D):
-    def __init__(self, curves: typing.List[PCurve3D]):
+    def __init__(self, curves: typing.List[PCurve3D],
+                 name: str = "CompositeCurve3D", construction: bool = False):
+        """
+
+        Parameters
+        ----------
+        curves
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'CompositeCurve3D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
         self.curves = curves
+        super().__init__(name=name, construction=construction)
 
     def to_iges(self, curve_iges_entities: typing.List[aerocaps.iges.entity.IGESEntity],
                 *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
@@ -2205,10 +2304,27 @@ class CurveOnParametricSurface(Geometry3D):
     def __init__(self,
                  surface: aerocaps.geom.Surface,
                  parametric_curve: aerocaps.geom.Geometry3D,
-                 model_space_curve: aerocaps.geom.Geometry3D):
+                 model_space_curve: aerocaps.geom.Geometry3D,
+                 name: str = "CurveOnParametricSurface",
+                 construction: bool = False):
+        """
+
+        Parameters
+        ----------
+        surface
+        parametric_curve
+        model_space_curve
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'CurveOnParametricSurface'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
         self.surface = surface
         self.parametric_curve = parametric_curve
         self.model_space_curve = model_space_curve
+        super().__init__(name=name, construction=construction)
 
     def to_iges(self,
                 surface_iges: aerocaps.iges.entity.IGESEntity,

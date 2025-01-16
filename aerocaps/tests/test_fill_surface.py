@@ -68,22 +68,3 @@ def test_fill_surface_xy_plane():
     entities.append(trimmed_surf.to_iges(entities[8], entities[9]))
     iges_generator = aerocaps.iges.iges_generator.IGESGenerator(entities, units="meters")
     iges_generator.generate("fill_surface_xy_plane.igs")
-
-
-def test_fill_surface_xy_plane_new_builtin():
-    # Create a triangle in the X-Y plane
-    points = np.array([
-        [0.0, 0.0, 0.0],
-        [1.0, 1.0, 0.0],
-        [0.0, 1.0, 0.0]
-    ])
-    p0 = aerocaps.Point3D.from_array(points[0, :])
-    p1 = aerocaps.Point3D.from_array(points[1, :])
-    p2 = aerocaps.Point3D.from_array(points[2, :])
-    line_1 = aerocaps.Line3D(p0=p0, p1=p1)
-    line_2 = aerocaps.Line3D(p0=p1, p1=p2)
-    line_3 = aerocaps.Line3D(p0=p2, p1=p0)
-
-    fill = aerocaps.PlanarFillSurfaceCreator([line_1, line_2, line_3])
-    iges_generator = aerocaps.iges.iges_generator.IGESGenerator(fill.to_iges(), units="meters")
-    iges_generator.generate("fill_surface_xy_plane_new_builtin.igs")

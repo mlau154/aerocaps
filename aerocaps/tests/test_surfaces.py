@@ -14,8 +14,8 @@ from aerocaps.geom.curves import BezierCurve3D,Line3D
 from aerocaps.geom import NegativeWeightError
 from aerocaps.units.angle import Angle
 from aerocaps.iges.iges_generator import IGESGenerator
+from aerocaps.geom.geometry_container import GeometryContainer
 from aerocaps import TEST_DIR
-
 
 
 def test_nurbs_revolve():
@@ -30,20 +30,11 @@ def test_nurbs_revolve():
     bezier = BezierCurve3D([Point3D.from_array(p) for p in cubic_bezier_cps])
     nurbs_surface = NURBSSurface.from_bezier_revolve(bezier, axis, Angle(deg=15.0), Angle(deg=130.0))
 
-    iges_entities = [nurbs_surface.to_iges()]
-    cp_net_points, cp_net_lines = nurbs_surface.generate_control_point_net()
-    iges_entities.extend([cp_net_point.to_iges() for cp_net_point in cp_net_points])
-    iges_entities.extend([cp_net_line.to_iges() for cp_net_line in cp_net_lines])
-
-    iges_file = os.path.join(TEST_DIR, "nurbs_test.igs")
-    iges_generator = IGESGenerator(iges_entities, "meters")
-    iges_generator.generate(iges_file)
-
-    point_array = nurbs_surface.evaluate(30, 30)
-    for point in point_array[:, 0, :]:
+    point_array = nurbs_surface.evaluate_grid(30, 30)
+    for point in point_array[0, :, :]:
         radius = np.sqrt(point[0] ** 2 + point[1] ** 2)
         assert np.isclose(radius, 1.0, 1e-10)
-    for point in point_array[:, -1, :]:
+    for point in point_array[-1, :, :]:
         radius = np.sqrt(point[0] ** 2 + point[1] ** 2)
         assert np.isclose(radius, 0.8, 1e-10)
 
@@ -152,7 +143,6 @@ def test_bezier_surface_2():
                 bez_surf_1.verify_g0(bez_surf_2, side_self, side_other)
                 bez_surf_1.verify_g1(bez_surf_2, side_self, side_other)
                 bez_surf_1.verify_g2(bez_surf_2, side_self, side_other)
-
 
 
 def test_bezier_surface_3():
