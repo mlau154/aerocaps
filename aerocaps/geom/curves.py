@@ -1956,7 +1956,7 @@ class RationalBezierCurve3D(PCurve3D):
         """
         projection = "XYZ" if projection is None else projection
         t_vec = np.linspace(0.0, 1.0, nt)
-        data = self.evaluate(t_vec).xyz
+        data = self.evaluate(t_vec)
         args = tuple([data[:, _projection_dict[axis]] for axis in projection])
 
         if isinstance(ax, plt.Axes):
