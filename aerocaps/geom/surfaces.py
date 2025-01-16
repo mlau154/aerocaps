@@ -956,6 +956,42 @@ class BezierSurface(Surface):
             return self.degree_v
         return self.degree_u
 
+    def get_parallel_n_points(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the number of control points in the parametric direction parallel to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the parallel number of control points is evaluated
+
+        Returns
+        -------
+        int
+            Number of control points parallel to the edge
+        """
+        if surface_edge in (SurfaceEdge.v1, SurfaceEdge.v0):
+            return self.n_points_u
+        return self.n_points_v
+
+    def get_perpendicular_n_points(self, surface_edge: SurfaceEdge) -> int:
+        r"""
+        Gets the number of control points in the parametric direction perpendicular to the input surface edge.
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge along which the perpendicular number of control points is evaluated
+
+        Returns
+        -------
+        int
+            Number of control points perpendicular to the edge
+        """
+        if surface_edge in (SurfaceEdge.v1, SurfaceEdge.v0):
+            return self.n_points_v
+        return self.n_points_u
+
     def get_point(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> Point3D:
         r"""
         Gets the point corresponding to a particular index along the edge curve with perpendicular index
@@ -1251,17 +1287,16 @@ class BezierSurface(Surface):
         def get_first_derivs_target() -> typing.Dict[SurfaceEdge, np.ndarray]:
             return {
                 target_edge: target_surf.get_first_derivs_along_edge(target_edge, n_points=n_deriv_points)
-                if data[0] else None for target_edge, data in surf_edge_mapping.items()
+                if _data[0] else None for target_edge, _data in surf_edge_mapping.items()
             }
 
         def get_points_to_update() -> typing.List[Point3D]:
             """Gets the points in the target surface that will be updated during the optimization"""
             points_to_update = []
-            for surface_edge, data in surf_edge_mapping.items():
-                degree = self.get_parallel_degree(surface_edge)
+            for surface_edge in surf_edge_mapping.keys():
                 # Loop through all the points in the second row starting from the second point and ending at the
                 # second-to-last point
-                for row_index in range(1, degree):
+                for row_index in range(1, self.get_parallel_n_points(surface_edge) - 1):
                     point = self.get_point(row_index, continuity_index=1, surface_edge=surface_edge)
                     if point in points_to_update:
                         continue
