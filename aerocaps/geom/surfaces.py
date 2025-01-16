@@ -140,11 +140,51 @@ class BezierSurface(Surface):
         if isinstance(points, np.ndarray):
             points = [[Point3D.from_array(pt_row) for pt_row in pt_mat] for pt_mat in points]
         self.points = points
-        self.degree_u = len(points) - 1
-        self.degree_v = len(points[0]) - 1
-        self.Nu = self.degree_u + 1
-        self.Nv = self.degree_v + 1
         super().__init__(name=name, construction=construction)
+
+    @property
+    def n_points_u(self) -> int:
+        """Number of control points in the :math:`u`-parametric direction"""
+        return len(self.points)
+
+    @property
+    def n_points_v(self) -> int:
+        """Number of control points in the :math:`v`-parametric direction"""
+        return len(self.points[0])
+
+    @property
+    def degree_u(self) -> int:
+        """Surface degree in the :math:`u`-parametric direction"""
+        return self.n_points_u - 1
+
+    @property
+    def degree_v(self) -> int:
+        """Surface degree in the :math:`v`-parametric direction"""
+        return self.n_points_v - 1
+
+    @property
+    def n(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.BezierSurface.degree_u`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`u`-parametric direction
+        """
+        return self.degree_u
+
+    @property
+    def m(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.BezierSurface.degree_v`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`v`-parametric direction
+        """
+        return self.degree_v
 
     def to_iges(self, *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
         """
@@ -1427,10 +1467,10 @@ class BezierSurface(Surface):
             return de_casteljau(i, j - 1, k) * (1 - u0) + de_casteljau(i + 1, j - 1, k) * u0
 
         bez_surf_split_1_P = np.array([
-            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
         ])
         bez_surf_split_2_P = np.array([
-            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.Nu)] for k in range(self.Nv)
+            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
         ])
 
         return (
@@ -1477,10 +1517,10 @@ class BezierSurface(Surface):
             return de_casteljau(i, j - 1, k) * (1 - v0) + de_casteljau(i + 1, j - 1, k) * v0
 
         bez_surf_split_1_P = np.array([
-            [de_casteljau(i=0, j=i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
         ])
         bez_surf_split_2_P = np.array([
-            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.Nv)] for k in range(self.Nu)
+            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
         ])
 
         return (
@@ -1502,12 +1542,12 @@ class BezierSurface(Surface):
         lines = []
         control_points = self.get_control_point_array()
 
-        for i in range(self.Nu):
-            for j in range(self.Nv):
+        for i in range(self.n_points_u):
+            for j in range(self.n_points_v):
                 points.append(Point3D.from_array(control_points[i, j, :]))
 
-        for i in range(self.Nu - 1):
-            for j in range(self.Nv - 1):
+        for i in range(self.n_points_u - 1):
+            for j in range(self.n_points_v - 1):
                 point_obj_1 = Point3D.from_array(control_points[i, j, :])
                 point_obj_2 = Point3D.from_array(control_points[i + 1, j, :])
                 point_obj_3 = Point3D.from_array(control_points[i, j + 1, :])
@@ -1516,7 +1556,7 @@ class BezierSurface(Surface):
                 line_2 = Line3D(p0=point_obj_1, p1=point_obj_3)
                 lines.extend([line_1, line_2])
 
-                if i < self.Nu - 2 and j < self.Nv - 2:
+                if i < self.n_points_u - 2 and j < self.n_points_v - 2:
                     continue
 
                 point_obj_4 = Point3D.from_array(control_points[i + 1, j + 1, :])
@@ -1650,19 +1690,51 @@ class RationalBezierSurface(Surface):
         self._knots_u = knots_u
         self._knots_v = knots_v
         self.weights = weights
-        self.degree_u = degree_u
-        self.degree_v = degree_v
         super().__init__(name=name, construction=construction)
 
     @property
     def n_points_u(self) -> int:
-        """Number of points in the :math:`u`-direction"""
+        """Number of control points in the :math:`u`-parametric direction"""
         return len(self.points)
 
     @property
     def n_points_v(self) -> int:
-        """Number of points in the :math:`v`-direction"""
+        """Number of control points in the :math:`v`-parametric direction"""
         return len(self.points[0])
+
+    @property
+    def degree_u(self) -> int:
+        """Surface degree in the :math:`u`-parametric direction"""
+        return self.n_points_u - 1
+
+    @property
+    def degree_v(self) -> int:
+        """Surface degree in the :math:`v`-parametric direction"""
+        return self.n_points_v - 1
+
+    @property
+    def n(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.degree_u`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`u`-parametric direction
+        """
+        return self.degree_u
+
+    @property
+    def m(self) -> int:
+        """
+        Shorthand for :obj:`~aerocaps.geom.surfaces.RationalBezierSurface.degree_v`
+
+        Returns
+        -------
+        int
+            Surface degree in the :math:`v`-parametric direction
+        """
+        return self.degree_v
 
     @property
     def knots_u(self) -> np.ndarray:

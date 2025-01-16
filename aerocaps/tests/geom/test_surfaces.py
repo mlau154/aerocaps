@@ -6,7 +6,7 @@ import pyvista as pv
 import aerocaps as ac
 from build.lib.aerocaps.iges.iges_generator import IGESGenerator
 
-_SHOW_PLOTS = True
+_SHOW_PLOTS = False
 
 
 class TestBezierSurface(TestCase):
