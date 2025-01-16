@@ -4892,30 +4892,31 @@ class NURBSSurface(Surface):
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
     
-    def is_clamped(self,surface_edge:SurfaceEdge):
-        p=self.get_perpendicular_degree(surface_edge)
-        knot=self.get_perpendicular_knots(surface_edge)
-        if (surface_edge==SurfaceEdge.u0 or surface_edge==SurfaceEdge.v0):
-            Start_val=knot[0]
-            if (np.all(knot[:(p+1)]==Start_val)):
+    def is_clamped(self, surface_edge: SurfaceEdge) -> bool:
+        """
+        Checks if the NURBS surface is clamped along an edge
+
+        Parameters
+        ----------
+        surface_edge: SurfaceEdge
+            Edge where the perpendicular knots will be inspected
+
+        Returns
+        -------
+        bool
+            Whether the surface is clamped at the given edge
+        """
+        p = self.get_perpendicular_degree(surface_edge)
+        knots = self.get_perpendicular_knots(surface_edge)
+        if surface_edge in (SurfaceEdge.u0, SurfaceEdge.v0):
+            start_knot = knots[0]
+            if np.all(knots[:(p+1)] == start_knot):
                 return True
-            else:
-                return False
-        elif(surface_edge==SurfaceEdge.u1 or surface_edge==SurfaceEdge.v1):
-            end_val=knot[-1]
-            if (np.all(knot[:-(p+1)]==end_val)):
-                return True
-            else:
-                return False
-    
-    @staticmethod
-    def _cast_uv(u: float or np.ndarray, v: float or np.ndarray) -> (float, float) or (np.ndarray, np.ndarray):
-        if not isinstance(u, np.ndarray):
-            u = np.array([u])
-        if not isinstance(v, np.ndarray):
-            v = np.array([v])
-    
-    
+            return False
+        end_knot = knots[-1]
+        if np.all(knots[:-(p+1)] == end_knot):
+            return True
+        return False
 
     def enforce_g0(self, other: "NURBSSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
