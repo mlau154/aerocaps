@@ -578,6 +578,23 @@ class BezierSurface(Surface):
         else:
             raise ValueError(f"No edge called {edge}")
 
+    def get_first_deriv_cp_sens_along_edge(self, edge: SurfaceEdge, i: int, j: int, n_points: int = 10,
+                                           perp: bool = True) -> np.ndarray:
+        if edge == SurfaceEdge.v1:
+            return np.array(bezier_surf_dsdv_dp_iso_v(i, j, self.n, self.m, 3, n_points, 1.0)) if perp else np.array(
+                bezier_surf_dsdu_dp_iso_v(i, j, self.n, self.m, 3, n_points, 1.0))
+        elif edge == SurfaceEdge.v0:
+            return np.array(bezier_surf_dsdv_dp_iso_v(i, j, self.n, self.m, 3, n_points, 0.0)) if perp else np.array(
+                bezier_surf_dsdu_dp_iso_v(i, j, self.n, self.m, 3, n_points, 0.0))
+        elif edge == SurfaceEdge.u1:
+            return np.array(bezier_surf_dsdu_dp_iso_u(i, j, self.n, self.m, 3, 1.0, n_points)) if perp else np.array(
+                bezier_surf_dsdv_dp_iso_u(i, j, self.n, self.m, 3, 1.0, n_points))
+        elif edge == SurfaceEdge.u0:
+            return np.array(bezier_surf_dsdu_dp_iso_u(i, j, self.n, self.m, 3, 0.0, n_points)) if perp else np.array(
+                bezier_surf_dsdv_dp_iso_u(i, j, self.n, self.m, 3, 0.0, n_points))
+        else:
+            raise ValueError(f"No edge called {edge}")
+
     def get_second_derivs_along_edge(self, edge: SurfaceEdge, n_points: int = 10, perp: bool = True) -> np.ndarray:
         r"""
         Evaluates the parallel or perpendicular second derivative along a surface edge at ``n_points`` parameter
@@ -1040,6 +1057,36 @@ class BezierSurface(Surface):
         else:
             raise ValueError("Invalid surface_edge value")
 
+    def get_point_ij(self, row_index: int, continuity_index: int, surface_edge: SurfaceEdge) -> (int, int):
+        r"""
+        Gets the point indices corresponding to a particular index along the edge curve with perpendicular index
+        corresponding to the level of continuity being applied.
+
+        Parameters
+        ----------
+        row_index: int
+            Index along the surface edge control points
+        continuity_index: int
+            Index in the parametric direction perpendicular to the surface edge. Normally either ``0``, ``1``, or ``2``
+        surface_edge: SurfaceEdge
+            Edge of the surface along which to retrieve the control point
+
+        Returns
+        -------
+        int, int
+            Point indices used to enforce :math:`G^x` continuity, where :math:`x` is the value of ``continuity_index``
+        """
+        if surface_edge == SurfaceEdge.v1:
+            return row_index, len(self.points[0]) - (continuity_index + 1)
+        elif surface_edge == SurfaceEdge.v0:
+            return row_index, continuity_index
+        elif surface_edge == SurfaceEdge.u1:
+            return len(self.points) - (continuity_index + 1), row_index
+        elif surface_edge == SurfaceEdge.u0:
+            return continuity_index, row_index
+        else:
+            raise ValueError("Invalid surface_edge value")
+
     def set_point(self, point: Point3D, row_index: int, continuity_index: int, surface_edge: SurfaceEdge):
         r"""
         Sets the point corresponding to a particular index along the edge curve with perpendicular index
@@ -1303,11 +1350,24 @@ class BezierSurface(Surface):
                     points_to_update.append(point)
             return points_to_update
 
+        def get_point_ijs_to_update() -> typing.List[typing.Tuple[int]]:
+            point_ijs_to_update = []
+            for surface_edge, _data in surf_edge_mapping.items():
+                # Loop through all the points in the second row starting from the second point and ending at the
+                # second-to-last point
+                for row_index in range(1, self.get_parallel_n_points(surface_edge) - 1):
+                    point_ij = self.get_point_ij(row_index, continuity_index=1, surface_edge=surface_edge)
+                    if point_ij in point_ijs_to_update:
+                        continue
+                    point_ijs_to_update.append(point_ij)
+            return point_ijs_to_update
+
         f_signs = {self_edge: evaluate_f_sign(self_edge, data[1]) for self_edge, data in surf_edge_mapping.items()}
         mod_points = get_points_to_update()
         x0 = np.array([p.as_array() for p in mod_points]).flatten()
+        mod_ijs = get_point_ijs_to_update()
 
-        def obj_fun(x) -> np.ndarray:
+        def obj_fun(x) -> float:
             x_reshaped = x.reshape((len(mod_points), 3))
             # Update the points in-place
             for i in range(x_reshaped.shape[0]):
@@ -1328,7 +1388,36 @@ class BezierSurface(Surface):
 
             return obj_fun_val
 
-        res = minimize(obj_fun, x0)
+        def jac(x) -> np.ndarray:
+            x_reshaped = x.reshape((len(mod_points), 3))
+            # Update the points in-place
+            for i in range(x_reshaped.shape[0]):
+                mod_points[i].x.m = x_reshaped[i, 0]
+                mod_points[i].y.m = x_reshaped[i, 1]
+                mod_points[i].z.m = x_reshaped[i, 2]
+
+            jac_arr = np.zeros(x.shape)
+            for target_edge, my_data in surf_edge_mapping.items():
+                f = surf_edge_mapping[target_edge][2]
+                f_sign = f_signs[target_edge]
+                A = -f_sign * f
+                d1_other = my_data[0].get_first_derivs_along_edge(my_data[1], n_points=n_deriv_points)
+                d1_self = target_surf.get_first_derivs_along_edge(target_edge, n_points=n_deriv_points)
+                start_xyz = 0
+                for mod_ij in mod_ijs:
+                    d1_sens_self = target_surf.get_first_deriv_cp_sens_along_edge(
+                        target_edge,
+                        mod_ij[0],
+                        mod_ij[1],
+                        n_points=n_deriv_points
+                    )
+                    # Maybe need to do another target edge inner loop here or right before the last call
+                    for k in range(3):
+                        jac_arr[start_xyz + k] += np.sum(2 * (d1_other[:, k] + A * d1_self[:, k]) * A * d1_sens_self[:, k])
+                    start_xyz += 3
+            return jac_arr
+
+        res = minimize(obj_fun, x0, jac=jac)
         print(f"{res = }")
 
     def enforce_g0g1g2(self, other: "BezierSurface", f: float,
