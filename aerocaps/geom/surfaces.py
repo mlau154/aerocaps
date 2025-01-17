@@ -7,7 +7,8 @@ from enum import Enum
 
 import numpy as np
 import pyvista as pv
-from scipy.optimize import fsolve, minimize
+import scipy.optimize
+from scipy.optimize import fsolve, minimize, OptimizeResult
 
 import aerocaps.iges.entity
 import aerocaps.iges.curves
@@ -1134,6 +1135,31 @@ class BezierSurface(Surface):
         else:
             raise ValueError("Invalid surface_edge value")
 
+    @staticmethod
+    def _evaluate_f_sign(surf_edge_1: SurfaceEdge, surf_edge_2: SurfaceEdge) -> float:
+        """
+        Evaluates the sign of the tangent proportionality factor across an edge pair
+
+        Parameters
+        ----------
+        surf_edge_1: SurfaceEdge
+            First surface edge
+        surf_edge_2: SurfaceEdge
+            Second surface edge
+
+        Returns
+        -------
+        float
+            ``1.0`` if positive, ``-1.0`` otherwise
+        """
+        surf_edges_0 = (SurfaceEdge.u0, SurfaceEdge.v0)
+        surf_edges_1 = (SurfaceEdge.u1, SurfaceEdge.v1)
+        if surf_edge_1 in surf_edges_0 and surf_edge_2 in surf_edges_0:
+            return -1.0
+        if surf_edge_1 in surf_edges_1 and surf_edge_2 in surf_edges_1:
+            return -1.0
+        return 1.0
+
     def enforce_g0(self, other: "BezierSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
         r"""
@@ -1256,10 +1282,6 @@ class BezierSurface(Surface):
 
     def enforce_g0g1_multiface(self,
                                target_surf: "BezierSurface",
-                               f_u0: float = 1.0,
-                               f_u1: float = 1.0,
-                               f_v0: float = 1.0,
-                               f_v1: float = 1.0,
                                adjacent_surf_u0: "BezierSurface" = None,
                                adjacent_surf_u1: "BezierSurface" = None,
                                adjacent_surf_v0: "BezierSurface" = None,
@@ -1268,8 +1290,12 @@ class BezierSurface(Surface):
                                other_edge_u1: SurfaceEdge = None,
                                other_edge_v0: SurfaceEdge = None,
                                other_edge_v1: SurfaceEdge = None,
+                               f_u0_initial: float = 1.0,
+                               f_u1_initial: float = 1.0,
+                               f_v0_initial: float = 1.0,
+                               f_v1_initial: float = 1.0,
                                n_deriv_points: int = 10,
-                               ):
+                               ) -> OptimizeResult:
         adjacent_surfs = (adjacent_surf_u0, adjacent_surf_u1, adjacent_surf_v0, adjacent_surf_v1)
         other_edges = (other_edge_u0, other_edge_u1, other_edge_v0, other_edge_v1)
         # Input validation
@@ -1284,10 +1310,10 @@ class BezierSurface(Surface):
 
         # Create a mapping between the surfaces and edges
         surf_edge_mapping = {
-            SurfaceEdge.u0: (adjacent_surf_u0, other_edge_u0, f_u0),
-            SurfaceEdge.u1: (adjacent_surf_u1, other_edge_u1, f_u1),
-            SurfaceEdge.v0: (adjacent_surf_v0, other_edge_v0, f_v0),
-            SurfaceEdge.v1: (adjacent_surf_v1, other_edge_v1, f_v1)
+            SurfaceEdge.u0: (adjacent_surf_u0, other_edge_u0, f_u0_initial),
+            SurfaceEdge.u1: (adjacent_surf_u1, other_edge_u1, f_u1_initial),
+            SurfaceEdge.v0: (adjacent_surf_v0, other_edge_v0, f_v0_initial),
+            SurfaceEdge.v1: (adjacent_surf_v1, other_edge_v1, f_v1_initial)
         }
         for self_edge, other_data in surf_edge_mapping.items():
             if any(other_data) or all(other_data):
@@ -1307,44 +1333,8 @@ class BezierSurface(Surface):
             for self_edge, data in surf_edge_mapping.items()
         }
 
-        def evaluate_f_sign(surf_edge_1: SurfaceEdge, surf_edge_2: SurfaceEdge) -> float:
-            """
-            Evaluates the sign of the tangent proportionality factor across an edge pair
-
-            Parameters
-            ----------
-            surf_edge_1: SurfaceEdge
-                First surface edge
-            surf_edge_2: SurfaceEdge
-                Second surface edge
-
-            Returns
-            -------
-            float
-                ``1.0`` if positive, ``-1.0`` otherwise
-            """
-            surf_edges_0 = (SurfaceEdge.u0, SurfaceEdge.v0)
-            surf_edges_1 = (SurfaceEdge.u1, SurfaceEdge.v1)
-            if surf_edge_1 in surf_edges_0 and surf_edge_2 in surf_edges_0:
-                return -1.0
-            if surf_edge_1 in surf_edges_1 and surf_edge_2 in surf_edges_1:
-                return -1.0
-            return 1.0
-
-        def get_points_to_update() -> typing.List[Point3D]:
-            """Gets the points in the target surface that will be updated during the optimization"""
-            points_to_update = []
-            for surface_edge in surf_edge_mapping.keys():
-                # Loop through all the points in the second row starting from the second point and ending at the
-                # second-to-last point
-                for row_index in range(1, self.get_parallel_n_points(surface_edge) - 1):
-                    point = self.get_point(row_index, continuity_index=1, surface_edge=surface_edge)
-                    if point in points_to_update:
-                        continue
-                    points_to_update.append(point)
-            return points_to_update
-
         def get_point_ijs_to_update() -> typing.List[typing.Tuple[int]]:
+            """Gets the indices of the points in the target surface that will be updated during the optimization"""
             point_ijs_to_update = []
             for surface_edge, _data in surf_edge_mapping.items():
                 # Loop through all the points in the second row starting from the second point and ending at the
@@ -1356,13 +1346,16 @@ class BezierSurface(Surface):
                     point_ijs_to_update.append(point_ij)
             return point_ijs_to_update
 
-        f_signs = {self_edge: evaluate_f_sign(self_edge, data[1]) for self_edge, data in surf_edge_mapping.items()}
-        mod_points = get_points_to_update()
+        f_signs = {self_edge: self._evaluate_f_sign(self_edge, data[1])
+                   for self_edge, data in surf_edge_mapping.items() if data is not None}
+        f_vals = {self_edge: data[2] for self_edge, data in surf_edge_mapping.items() if data is not None}
         mod_ijs = get_point_ijs_to_update()
+        mod_points = [target_surf.points[i][j] for i, j in mod_ijs]
         x0 = np.array([p.as_array() for p in mod_points]).flatten()
+        x0 = np.append(x0, np.array(list(f_vals.values())))
 
         def obj_fun_and_jac(x) -> (float, np.ndarray):
-            x_reshaped = x.reshape((len(mod_points), 3))
+            x_reshaped = x[:3 * len(mod_ijs)].reshape((len(mod_points), 3))
             jac_arr = np.zeros(x.shape)
             # Update the points in-place
             for i in range(x_reshaped.shape[0]):
@@ -1372,12 +1365,13 @@ class BezierSurface(Surface):
 
             # Evaluate the objective function and Jacobian
             obj_fun_val = 0.0
-            for target_edge, multiface_data in surf_edge_mapping.items():
+            for edge_idx, (target_edge, multiface_data) in enumerate(surf_edge_mapping.items()):
                 if surf_edge_mapping[target_edge] is None:
                     continue
-                f = surf_edge_mapping[target_edge][2]
+                f = x[3 * len(mod_ijs) + edge_idx]
                 f_sign = f_signs[target_edge]
-                A = -f_sign * 1 / f
+                A = -f_sign * 1 / abs(f)
+                dA = f_sign * 1 / f ** 2
                 d1_self = target_surf.get_first_derivs_along_edge(target_edge, n_points=n_deriv_points)
 
                 # Objective function value update
@@ -1395,13 +1389,17 @@ class BezierSurface(Surface):
                     # Jacobian array update
                     for k in range(3):
                         jac_arr[start_xyz + k] += np.sum(
-                            2 * (d1_other[target_edge][:, k] + A * d1_self[:, k]) * A * d1_sens_self[:, k])
+                            2 * (d1_other[target_edge][:, k] + A * d1_self[:, k]) * A * d1_sens_self[:, k]
+                        )
                     start_xyz += 3
+                jac_arr[3 * len(mod_ijs) + edge_idx] = np.sum(
+                    2 * (d1_other[target_edge] + A * d1_self) * dA * d1_self
+                )
 
             return obj_fun_val, jac_arr
 
         res = minimize(obj_fun_and_jac, x0, jac=True)
-        print(f"{res = }")
+        return res
 
     def enforce_g0g1g2(self, other: "BezierSurface", f: float,
                        surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
