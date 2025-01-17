@@ -187,13 +187,136 @@ def plot_fill_surface(image_dir: str = None):
         plot.show()
 
 
+def plot_enforce_g0g1_multiface(image_dir: str = None):
+    bez_surf_u0 = ac.BezierSurface(np.array([
+        [
+            [0.0, 0.0, 0.0],
+            [0.3, 0.1, 0.1],
+            [0.6, -0.1, 0.0],
+            [1.0, 0.0, 0.0]
+        ],
+        [
+            [0.0, 0.5, 0.0],
+            [0.3, 0.7, 0.1],
+            [0.6, 0.4, 0.1],
+            [1.0, 0.5, 0.0]
+        ],
+        [
+            [0.0, 1.0, 0.0],
+            [0.3, 1.1, 0.2],
+            [0.6, 0.9, 0.1],
+            [1.0, 1.0, 0.0]
+        ]
+    ]))
+    bez_surf_u1 = ac.BezierSurface(np.array([
+        [
+            [0.0, -1.0, 0.0],
+            [0.3, -0.7, 0.1],
+            [0.6, -1.0, 0.0],
+            [1.0, -1.0, 0.0]
+        ],
+        [
+            [0.0, -1.5, 0.0],
+            [0.3, -1.3, 0.2],
+            [0.6, -1.4, 0.2],
+            [1.0, -1.5, 0.0]
+        ],
+        [
+            [0.0, -2.0, 0.0],
+            [0.3, -1.9, 0.2],
+            [0.6, -2.1, 0.0],
+            [1.0, -2.0, 0.0]
+        ]
+    ]))
+    bez_surf_v0 = ac.BezierSurface(np.array([
+        [
+            [0.0, 0.0, 0.0],
+            [-0.1, -0.3, 0.0],
+            [0.1, -0.8, 0.1],
+            [0.0, -1.0, 0.0]
+        ],
+        [
+            [-1.0, 0.0, 0.0],
+            [-1.1, -0.4, 0.1],
+            [-0.9, -0.8, 0.0],
+            [-1.0, -1.1, 0.0]
+        ],
+        [
+            [-2.0, 0.0, 0.0],
+            [-2.0, -0.3, 0.0],
+            [-2.0, -0.7, 0.0],
+            [-2.0, -1.0, 0.0]
+        ]
+    ]))
+    bez_surf_v1 = ac.BezierSurface(np.array([
+        [
+            [1.0, 0.0, 0.0],
+            [0.9, -0.3, 0.0],
+            [0.8, -0.7, 0.1],
+            [1.0, -1.0, 0.0]
+        ],
+        [
+            [2.0, 0.0, 0.0],
+            [2.1, -0.3, 0.1],
+            [1.9, -0.7, 0.0],
+            [2.0, -1.1, 0.0]
+        ],
+        [
+            [2.5, 0.0, 0.0],
+            [2.5, -0.4, 0.0],
+            [2.5, -0.6, 0.0],
+            [2.5, -1.0, 0.0]
+        ]
+    ]))
+    bez_surf_target = ac.BezierSurface(np.zeros((4, 4, 3)))
+    bez_surf_target.enforce_g0g1_multiface(
+        adjacent_surf_u0=bez_surf_u0,
+        adjacent_surf_u1=bez_surf_u1,
+        adjacent_surf_v0=bez_surf_v0,
+        adjacent_surf_v1=bez_surf_v1,
+        other_edge_u0=ac.SurfaceEdge.u0,
+        other_edge_u1=ac.SurfaceEdge.u0,
+        other_edge_v0=ac.SurfaceEdge.u0,
+        other_edge_v1=ac.SurfaceEdge.u0
+    )
+
+    surfs = [bez_surf_u0, bez_surf_u1, bez_surf_v0, bez_surf_v1, bez_surf_target]
+    colors = ["blue", "red", "yellow", "purple", "green"]
+    plot = pv.Plotter(off_screen=True if image_dir else False, window_size=[1024, 600])
+    for idx, (surf, color) in enumerate(zip(surfs, colors)):
+        surf.plot_surface(
+            plot,
+            50,
+            50,
+            color=color,
+            show_edges=True if idx == 4 else False
+        )
+        surf.plot_control_points(
+            plot,
+            render_points_as_spheres=True,
+            point_size=16,
+            color="lime" if idx == 4 else "black"
+        )
+        surf.plot_control_point_mesh_lines(
+            plot,
+            color="gray"
+        )
+    plot.add_axes()
+    plot.zoom_camera(3.0)
+    if image_dir is not None:
+        plot.screenshot(os.path.join(image_dir, "bezier_enforce_g0g1_multiface.png"), scale=1)
+    else:
+        plot.show()
+
+
 def main(*args, **kwargs):
     # plot_bezier_surf_2x3(*args, **kwargs)
     # plot_bezier_surf_2x3_uv_labels(*args, **kwargs)
     # plot_bezier_surf_2x3_mesh_only(*args, **kwargs)
     # plot_bezier_surf_2x3_u_elevated(*args, **kwargs)
     # plot_bezier_surf_2x3_v_elevated(*args, **kwargs)
-    plot_fill_surface(*args, **kwargs)
+    # plot_fill_surface(*args, **kwargs)
+    plot_enforce_g0g1_multiface(*args, **kwargs)
 
 
 if __name__ == "__main__":

@@ -7,18 +7,18 @@ from enum import Enum
 
 import numpy as np
 import pyvista as pv
-import scipy.optimize
+from rust_nurbs import *
 from scipy.optimize import fsolve, minimize, OptimizeResult
 
-import aerocaps.iges.entity
 import aerocaps.iges.curves
+import aerocaps.iges.entity
 import aerocaps.iges.surfaces
-from rust_nurbs import *
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
-from aerocaps.geom.point import Point3D
 from aerocaps.geom.curves import BezierCurve3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSplineCurve3D
 from aerocaps.geom.plane import Plane
-from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis, add_vector_to_point
+from aerocaps.geom.point import Point3D
+from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis, \
+    add_vector_to_point
 from aerocaps.geom.vector import Vector3D
 from aerocaps.units.angle import Angle
 from aerocaps.units.length import Length
@@ -1150,7 +1150,7 @@ class BezierSurface(Surface):
         Returns
         -------
         float
-            ``1.0`` if positive, ``-1.0`` otherwise
+            ``-1.0`` if both surface edges end in 0 or both surface edges end in 1, ``1.0`` otherwise
         """
         surf_edges_0 = (SurfaceEdge.u0, SurfaceEdge.v0)
         surf_edges_1 = (SurfaceEdge.u1, SurfaceEdge.v1)
@@ -1281,7 +1281,6 @@ class BezierSurface(Surface):
         self.enforce_g0g1(other, 1.0, surface_edge, other_surface_edge)
 
     def enforce_g0g1_multiface(self,
-                               target_surf: "BezierSurface",
                                adjacent_surf_u0: "BezierSurface" = None,
                                adjacent_surf_u1: "BezierSurface" = None,
                                adjacent_surf_v0: "BezierSurface" = None,
@@ -1296,6 +1295,87 @@ class BezierSurface(Surface):
                                f_v1_initial: float = 1.0,
                                n_deriv_points: int = 10,
                                ) -> OptimizeResult:
+        r"""
+        Enforces :math:`G^0` and :math:`G^1` continuity across multiple adjacent boundaries of a surface,
+        up to all four boundaries. This is done by first enforcing :math:`G^0` continuity at all required boundaries
+        and then optimizing the locations of the second rows of control points to minimize :math:`G^1` error at
+        ``n_deriv_points`` locations along each of the boundary curves. The following is the cost function that is
+        minimized:
+
+        .. math::
+
+            J(x_k) = \sum\limits_{i=0}^{n_p n_{\mathcal{E}}} \left( \left. \frac{\partial \mathbf{S}_i^a(u,v)}{\partial \mu} \right|_{u=u_i,v=v_i} - \frac{f_{\text{sgn},i}}{f_i(x_k)}  \left. \frac{\partial \mathbf{S}^b(u,v,x_k)}{\partial \mu} \right|_{u=u_i,v=v_i} \right)^2
+
+        where
+
+        * :math:`x_k` is the set of design variables to be optimized including the internal control point locations and tangent proportionality factors across each boundary
+        * :math:`n_p` is the number of discrete first derivative calculations on each boundary (specified by ``n_deriv_points``)
+        * :math:`n_\mathcal{E}` is the number of edges across which continuity is being enforced
+        * :math:`\mathbf{S}_i^a(u,v)` is a surface specified by ``adjacent_surf_u0``, etc.
+        * :math:`\mu` is equal to either :math:`u` or :math:`v`, determined by the parametric direction perpendicular to the edge
+        * :math:`(u_i,v_i)` is the point along an edge where the derivative is being evaluated
+        * :math:`f_{\text{sgn},i}` is the sign of the proportionality factor, :math:`-1` if both the target edge and other edge specified by :math:`i` end in :math:`0` or both end in :math:`1`, :math:`1` otherwise
+        * :math:`f_i(x_k)` is the tangent proportionality factor
+        * :math:`\mathbf{S}^b(u,v,x_k)` is the target surface (``self``)
+
+        For maximum performance of the optimizer, the exact Jacobian is calculated:
+
+        .. math::
+
+            \frac{\partial J(x_k)}{\partial x_k} = 2 \sum\limits_{i=0}^{n_p n_{\mathcal{E}}} \left( \left. \frac{\partial \mathbf{S}_i^a(u,v)}{\partial \mu} \right|_{u=u_i,v=v_i} - \frac{f_{\text{sgn},i}}{f_i(x_k)}  \left. \frac{\partial \mathbf{S}^b(u,v,x_k)}{\partial \mu} \right|_{u=u_i,v=v_i} \right) \left[ -f_{\text{sgn},i} \frac{\partial}{\partial x_k} \left( \frac{1}{f_i} \right) \left( \left. \frac{\partial \mathbf{S}^b(u,v,x_k)}{\partial \mu} \right|_{u=u_i,v=v_i} \right) -\frac{f_{\text{sgn},i}}{f_i} \frac{\partial}{\partial x_k} \left(  \left. \frac{\partial \mathbf{S}^b(u,v,x_k)}{\partial \mu} \right|_{u=u_i,v=v_i} \right) \right]
+
+        .. note::
+
+            This method is reserved for the complex case where continuity is required across boundaries that
+            share a surface corner. In the case of continuity with a single surface or a pair of surfaces
+            with common boundaries on opposite sides of the surface (such as the :math:`v_0` and :math:`v_1`
+            boundaries), the much simpler :obj:`~aerocaps.geom.surfaces.BezierSurface.enforce_g0g1` should
+            be used.
+
+        .. figure:: ../images/bezier_enforce_g0g1_multiface.*
+            :align: center
+            :width: 600
+
+            Multi-face :math:`G^1` continuity enforcement
+
+        Parameters
+        ----------
+        adjacent_surf_u0: BezierSurface
+            Surface sharing the :math:`u_0` boundary of ``target_surf``. Default: ``None``
+        adjacent_surf_u1: BezierSurface
+            Surface sharing the :math:`u_1` boundary of ``target_surf``. Default: ``None``
+        adjacent_surf_v0: BezierSurface
+            Surface sharing the :math:`v_0` boundary of ``target_surf``. Default: ``None``
+        adjacent_surf_v1: BezierSurface
+            Surface sharing the :math:`v_1` boundary of ``target_surf``. Default: ``None``
+        other_edge_u0: SurfaceEdge
+            Edge of surface ``adjacent_surf_u0`` that will be stitched. Default: ``None``
+        other_edge_u1: SurfaceEdge
+            Edge of surface ``adjacent_surf_u0`` that will be stitched. Default: ``None``
+        other_edge_v0: SurfaceEdge
+            Edge of surface ``adjacent_surf_u0`` that will be stitched. Default: ``None``
+        other_edge_v1: SurfaceEdge
+            Edge of surface ``adjacent_surf_u0`` that will be stitched. Default: ``None``
+        f_u0_initial: float
+            Initial value of the tangent proportionality factor across boundary :math:`u_0`. The final value
+            selected by the optimizer will be different from this value. Default: ``1.0``
+        f_u1_initial: float
+            Initial value of the tangent proportionality factor across boundary :math:`u_1`. The final value
+            selected by the optimizer will be different from this value. Default: ``1.0``
+        f_v0_initial: float
+            Initial value of the tangent proportionality factor across boundary :math:`v_0`. The final value
+            selected by the optimizer will be different from this value. Default: ``1.0``
+        f_v1_initial: float
+            Initial value of the tangent proportionality factor across boundary :math:`v_1`. The final value
+            selected by the optimizer will be different from this value. Default: ``1.0``
+        n_deriv_points: int
+            Number of discrete locations where the continuity error will be evaluated. Default: ``10``
+
+        Returns
+        -------
+        OptimizeResult
+            Result from the :math:`G^1`-continuity minimization problem solution
+        """
         adjacent_surfs = (adjacent_surf_u0, adjacent_surf_u1, adjacent_surf_v0, adjacent_surf_v1)
         other_edges = (other_edge_u0, other_edge_u1, other_edge_v0, other_edge_v1)
         # Input validation
@@ -1324,7 +1404,7 @@ class BezierSurface(Surface):
         # Enforce G0 continuity with all surfaces
         for self_edge in surf_edge_mapping.keys():
             data = surf_edge_mapping[self_edge]
-            target_surf.enforce_g0(
+            self.enforce_g0(
                 data[0], surface_edge=self_edge, other_surface_edge=data[1]
             )
 
@@ -1350,11 +1430,25 @@ class BezierSurface(Surface):
                    for self_edge, data in surf_edge_mapping.items() if data is not None}
         f_vals = {self_edge: data[2] for self_edge, data in surf_edge_mapping.items() if data is not None}
         mod_ijs = get_point_ijs_to_update()
-        mod_points = [target_surf.points[i][j] for i, j in mod_ijs]
+        mod_points = [self.points[i][j] for i, j in mod_ijs]
         x0 = np.array([p.as_array() for p in mod_points]).flatten()
         x0 = np.append(x0, np.array(list(f_vals.values())))
 
-        def obj_fun_and_jac(x) -> (float, np.ndarray):
+        def obj_fun_and_jac(x: np.ndarray) -> (float, np.ndarray):
+            """
+            Computes the objective function as the sum of the squares of the :math:`G^1` continuity error, along
+            with the Jacobian
+
+            Parameters
+            ----------
+            x: np.ndarray
+                1-D array of design variable values
+
+            Returns
+            -------
+            float, np.ndarray
+                The objective function value and the Jacobian (a 1-D array of sensitivities)
+            """
             x_reshaped = x[:3 * len(mod_ijs)].reshape((len(mod_points), 3))
             jac_arr = np.zeros(x.shape)
             # Update the points in-place
@@ -1372,7 +1466,7 @@ class BezierSurface(Surface):
                 f_sign = f_signs[target_edge]
                 A = -f_sign * 1 / abs(f)
                 dA = f_sign * 1 / f ** 2
-                d1_self = target_surf.get_first_derivs_along_edge(target_edge, n_points=n_deriv_points)
+                d1_self = self.get_first_derivs_along_edge(target_edge, n_points=n_deriv_points)
 
                 # Objective function value update
                 obj_fun_val += np.sum((d1_other[target_edge] + A * d1_self)**2)
@@ -1380,7 +1474,7 @@ class BezierSurface(Surface):
                 # Jacobian update loop
                 start_xyz = 0
                 for mod_ij in mod_ijs:
-                    d1_sens_self = target_surf.get_first_deriv_cp_sens_along_edge(
+                    d1_sens_self = self.get_first_deriv_cp_sens_along_edge(
                         target_edge,
                         mod_ij[0],
                         mod_ij[1],

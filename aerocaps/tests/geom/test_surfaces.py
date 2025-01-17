@@ -93,7 +93,6 @@ class TestBezierSurface(TestCase):
         ]))
         bez_surf_target = ac.BezierSurface(np.zeros((4, 4, 3)))
         bez_surf_target.enforce_g0g1_multiface(
-            bez_surf_target,
             adjacent_surf_u0=bez_surf_u0,
             adjacent_surf_u1=bez_surf_u1,
             adjacent_surf_v0=bez_surf_v0,
@@ -109,7 +108,7 @@ class TestBezierSurface(TestCase):
             iges = IGESGenerator([surf.to_iges() for surf in surfs], units="meters")
             iges.generate("surf_opt_test.igs")
             colors = ["blue", "red", "yellow", "purple", "green"]
-            plot = pv.Plotter()
+            plot = pv.Plotter(off_screen=True)
             for idx, (surf, color) in enumerate(zip(surfs, colors)):
                 surf.plot_surface(
                     plot,
