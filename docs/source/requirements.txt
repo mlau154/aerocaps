@@ -6,4 +6,4 @@ matplotlib
 pyvista
 pyiges
 shapely
-rust-nurbs
+rust-nurbs>=0.23
