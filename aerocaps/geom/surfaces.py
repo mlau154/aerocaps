@@ -1302,7 +1302,7 @@ class BezierSurface(Surface):
                 data[0], surface_edge=self_edge, other_surface_edge=data[1]
             )
 
-        first_derivs_other = {
+        d1_other = {
             self_edge: data[0].get_first_derivs_along_edge(data[1], n_points=n_deriv_points) if data[0] else None
             for self_edge, data in surf_edge_mapping.items()
         }
@@ -1358,48 +1358,32 @@ class BezierSurface(Surface):
 
         f_signs = {self_edge: evaluate_f_sign(self_edge, data[1]) for self_edge, data in surf_edge_mapping.items()}
         mod_points = get_points_to_update()
-        x0 = np.array([p.as_array() for p in mod_points]).flatten()
         mod_ijs = get_point_ijs_to_update()
+        x0 = np.array([p.as_array() for p in mod_points]).flatten()
 
-        def obj_fun(x) -> float:
+        def obj_fun_and_jac(x) -> (float, np.ndarray):
             x_reshaped = x.reshape((len(mod_points), 3))
-            # Update the points in-place
-            for i in range(x_reshaped.shape[0]):
-                mod_points[i].x.m = x_reshaped[i, 0]
-                mod_points[i].y.m = x_reshaped[i, 1]
-                mod_points[i].z.m = x_reshaped[i, 2]
-
-            # Evaluate the objective function
-            obj_fun_val = 0.0  # This will be cast to a 1-D array
-            for target_edge in surf_edge_mapping.keys():
-                if surf_edge_mapping[target_edge] is None:
-                    continue
-                f = surf_edge_mapping[target_edge][2]
-                first_derivs_target = target_surf.get_first_derivs_along_edge(target_edge, n_points=n_deriv_points)
-                obj_fun_val += np.sum(
-                    (first_derivs_other[target_edge] - f_signs[target_edge] * 1/f * first_derivs_target)**2
-                )
-
-            return obj_fun_val
-
-        def jac(x) -> np.ndarray:
-            x_reshaped = x.reshape((len(mod_points), 3))
-            # Update the points in-place
-            for i in range(x_reshaped.shape[0]):
-                mod_points[i].x.m = x_reshaped[i, 0]
-                mod_points[i].y.m = x_reshaped[i, 1]
-                mod_points[i].z.m = x_reshaped[i, 2]
-
-            # Evaluate the Jacobian
             jac_arr = np.zeros(x.shape)
-            for target_edge, my_data in surf_edge_mapping.items():
+            # Update the points in-place
+            for i in range(x_reshaped.shape[0]):
+                mod_points[i].x.m = x_reshaped[i, 0]
+                mod_points[i].y.m = x_reshaped[i, 1]
+                mod_points[i].z.m = x_reshaped[i, 2]
+
+            # Evaluate the objective function and Jacobian
+            obj_fun_val = 0.0
+            for target_edge, multiface_data in surf_edge_mapping.items():
                 if surf_edge_mapping[target_edge] is None:
                     continue
                 f = surf_edge_mapping[target_edge][2]
                 f_sign = f_signs[target_edge]
-                A = -f_sign * f
-                d1_other = my_data[0].get_first_derivs_along_edge(my_data[1], n_points=n_deriv_points)
+                A = -f_sign * 1 / f
                 d1_self = target_surf.get_first_derivs_along_edge(target_edge, n_points=n_deriv_points)
+
+                # Objective function value update
+                obj_fun_val += np.sum((d1_other[target_edge] + A * d1_self)**2)
+
+                # Jacobian update loop
                 start_xyz = 0
                 for mod_ij in mod_ijs:
                     d1_sens_self = target_surf.get_first_deriv_cp_sens_along_edge(
@@ -1408,13 +1392,15 @@ class BezierSurface(Surface):
                         mod_ij[1],
                         n_points=n_deriv_points
                     )
-                    # Maybe need to do another target edge inner loop here or right before the last call
+                    # Jacobian array update
                     for k in range(3):
-                        jac_arr[start_xyz + k] += np.sum(2 * (d1_other[:, k] + A * d1_self[:, k]) * A * d1_sens_self[:, k])
+                        jac_arr[start_xyz + k] += np.sum(
+                            2 * (d1_other[target_edge][:, k] + A * d1_self[:, k]) * A * d1_sens_self[:, k])
                     start_xyz += 3
-            return jac_arr
 
-        res = minimize(obj_fun, x0, jac=jac)
+            return obj_fun_val, jac_arr
+
+        res = minimize(obj_fun_and_jac, x0, jac=True)
         print(f"{res = }")
 
     def enforce_g0g1g2(self, other: "BezierSurface", f: float,
