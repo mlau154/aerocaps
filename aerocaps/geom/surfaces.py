@@ -3,6 +3,7 @@ Parametric surface classes (two-dimensional geometric objects defined by paramet
 that reside in three-dimensional space)
 """
 import typing
+from copy import deepcopy
 from enum import Enum
 
 import numpy as np
@@ -2212,7 +2213,7 @@ class RationalBezierSurface(Surface):
 
         self._knots_u = knots_u
         self._knots_v = knots_v
-        self.weights = weights
+        self.weights = deepcopy(weights)
         super().__init__(name=name, construction=construction)
 
     @property
@@ -2696,6 +2697,18 @@ class RationalBezierSurface(Surface):
             return RationalBezierCurve3D(P[:, -1, :], w[:, -1])
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
+
+    def reverse_u(self) -> "RationalBezierSurface":
+        """Reverses the surface in the :math:`u`-direction"""
+        P = self.get_control_point_array()[::-1, :, :]
+        w = self.weights[::-1, :]
+        return RationalBezierSurface(P, w)
+
+    def reverse_v(self) -> "RationalBezierSurface":
+        """Reverses the surface in the :math:`v`-direction"""
+        P = self.get_control_point_array()[:, ::-1, :]
+        w = self.weights[:, ::-1]
+        return RationalBezierSurface(P, w)
 
     def get_parallel_degree(self, surface_edge: SurfaceEdge):
         r"""
@@ -4353,8 +4366,8 @@ class BSplineSurface(Surface):
         assert knots_u.ndim == 1
         assert knots_v.ndim == 1
 
-        self.knots_u = knots_u
-        self.knots_v = knots_v
+        self.knots_u = deepcopy(knots_u)
+        self.knots_v = deepcopy(knots_v)
 
         self._weights = np.ones((len(points), len(points[0])))
         super().__init__(name=name, construction=construction)
@@ -5423,9 +5436,9 @@ class NURBSSurface(Surface):
                 if weight < 0:
                     raise NegativeWeightError("All weights must be non-negative")
 
-        self.knots_u = knots_u
-        self.knots_v = knots_v
-        self.weights = weights
+        self.knots_u = deepcopy(knots_u)
+        self.knots_v = deepcopy(knots_v)
+        self.weights = deepcopy(weights)
         super().__init__(name=name, construction=construction)
 
     @property
@@ -5512,6 +5525,20 @@ class NURBSSurface(Surface):
             self.get_control_point_array() * np.repeat(self.weights[:, :, np.newaxis], 3, axis=2),
             self.weights
         ))
+
+    @staticmethod
+    def project_homogeneous_control_points(homogeneous_points: np.ndarray) -> (np.ndarray, np.ndarray):
+        """
+        Projects the homogeneous coordinates onto the :math:`w=1` hyperplane.
+
+        Returns
+        -------
+        numpy.ndarray, numpy.ndarray
+            The projected coordinates in three-dimensional space followed by the weight array
+        """
+        P = homogeneous_points[:, :, :3] / np.repeat(homogeneous_points[:, :, -1][:, :, np.newaxis], 3, axis=2)
+        w = homogeneous_points[:, :, -1]
+        return P, w
 
     @classmethod
     def from_bezier_revolve(cls, bezier: BezierCurve3D, axis: Line3D,
@@ -6006,6 +6033,26 @@ class NURBSSurface(Surface):
         if np.all(knots[-(p + 1):] == end_knot):
             return True
         return False
+
+    def has_internal_knots(self, direction: str) -> bool:
+        """
+        Whether the surface has internal knots in the specified direction
+
+        Parameters
+        ----------
+        direction: str
+            Either 'u' or 'v'
+
+        Returns
+        -------
+        bool
+        """
+        if direction == "u":
+            return len(set(self.knots_u)) > 2
+        elif direction == "v":
+            return len(set(self.knots_v)) > 2
+        else:
+            raise ValueError(f"Invalid direction {direction}. Must be either 'u' or 'v'")
 
     def enforce_g0(self, other: "NURBSSurface",
                    surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge):
@@ -6704,6 +6751,181 @@ class NURBSSurface(Surface):
                     current_f = dxdydz_ratio
                     continue
                 assert np.all(np.isclose(dxdydz_ratio, current_f))
+
+    def get_u_or_v_given_uvxyz(self, u: float = None, v: float = None, uv_guess: float = 0.5,
+                               x: Length = None, y: Length = None, z: Length = None):
+        """
+        Computes one parametric value given the other and a specified :math:`x`-, :math:`y`-, or :math:`z`-location.
+        As an example, given a :obj:`~aerocaps.geom.surfaces.NURBSSurface` object
+        assigned to the variable ``surf``,
+        the :math:`u`-parameter corresponding to :math:`y=1.4` along the :math:`v=0.8` isoparametric curve can be
+        computed using
+
+        .. code-block:: python
+
+            u = surf.get_u_or_v_given_uvxyz(v=0.8, y=1.4)
+
+        Note that the inputs are keyword arguments to avoid having to specify ``None`` for each of the arguments
+        not used.
+
+        Parameters
+        ----------
+        u: float or None
+            Value of :math:`u` to solve for or specify. If left as ``None``, this parameter will be solved for.
+            If ``None``, :math:`v` must be specified. Default: ``None``
+        v: float or None
+            Value of :math:`v` to solve for or specify. If left as ``None``, this parameter will be solved for.
+            If ``None``, :math:`u` must be specified. Default: ``None``
+        uv_guess: float
+            Starting guess for the unsolved :math:`u` or :math:`v` parameter. Default: ``0.5``
+        x: Length or None
+            :math:`x`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
+            outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
+            either :math:`y` or :math:`z` must be specified. Default: ``None``
+        y: Length or None
+            :math:`y`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
+            outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
+            either :math:`x` or :math:`z` must be specified. Default: ``None``
+        z: Length or None
+            :math:`z`-location corresponding to the :math:`u` or :math:`v` parameter to be solved. If this value is
+            outside the surface geometry, the root-finder will fail and an error will be raised. If unspecified,
+            either :math:`x` or :math:`y` must be specified. Default: ``None``
+
+        Returns
+        -------
+        float
+            The value of :math:`u` if :math:`v` is specified or :math:`v` if :math:`u` is specified
+        """
+        # Validate inputs
+        if u is None and v is None or (u is not None and v is not None):
+            raise ValueError("Must specify exactly one of either u or v")
+        xyz_spec = (x is not None, y is not None, z is not None)
+        if len([xyz for xyz in xyz_spec if xyz]) != 1:
+            raise ValueError("Must specify exactly one of x, y, or z")
+
+        if x is not None:
+            xyz, xyz_val = "x", x.m
+        elif y is not None:
+            xyz, xyz_val = "y", y.m
+        elif z is not None:
+            xyz, xyz_val = "z", z.m
+        else:
+            raise ValueError("Did not detect an x, y, or z input")
+
+        def root_find_func_u(u_current):
+            point = self.evaluate_point3d(u_current, v)
+            return np.array([getattr(point, xyz).m - xyz_val])
+
+        def root_find_func_v(v_current):
+            point = self.evaluate_point3d(u, v_current)
+            return np.array([getattr(point, xyz).m - xyz_val])
+
+        if v is not None:
+            return fsolve(root_find_func_u, x0=np.array([uv_guess]))[0]
+        if u is not None:
+            return fsolve(root_find_func_v, x0=np.array([uv_guess]))[0]
+        raise ValueError("Did not detect a u or v input")
+
+    def split_at_u(self, u0: float) -> ("NURBSSurface", "NURBSSurface"):
+        """
+        Splits the NURBS surface at :math:`u=u_0` along the :math:`v`-parametric direction.
+        """
+        if self.has_internal_knots("u"):
+            raise NotImplementedError(
+                "Curve splitting perpendicular to an edge with internal knots is not yet implemented"
+            )
+        Pw = self.get_homogeneous_control_points()
+
+        def de_casteljau(i: int, j: int, k: int) -> np.ndarray:
+            """
+            Based on https://en.wikipedia.org/wiki/De_Casteljau%27s_algorithm. Recursive algorithm where the
+            base case is just the value of the ith original control point.
+
+            Parameters
+            ----------
+            i: int
+                Lower index
+            j: int
+                Upper index
+            k: int
+                Control point row index
+
+            Returns
+            -------
+            np.ndarray
+                A one-dimensional array containing the :math:`x` and :math:`y` values of a control point evaluated
+                at :math:`(i,j)` for a Bézier curve split at the parameter value ``t_split``
+            """
+            if j == 0:
+                return Pw[i, k, :]
+            return de_casteljau(i, j - 1, k) * (1 - u0) + de_casteljau(i + 1, j - 1, k) * u0
+
+        bez_surf_split_1_Pw = np.array([
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
+        ])
+        bez_surf_split_2_Pw = np.array([
+            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
+        ])
+
+        transposed_Pw_1 = np.transpose(bez_surf_split_1_Pw, (1, 0, 2))
+        transposed_Pw_2 = np.transpose(bez_surf_split_2_Pw, (1, 0, 2))
+
+        P1, w1 = self.project_homogeneous_control_points(transposed_Pw_1)
+        P2, w2 = self.project_homogeneous_control_points(transposed_Pw_2)
+
+        return (
+            NURBSSurface(P1, self.knots_u, self.knots_v, w1),
+            NURBSSurface(P2, self.knots_u, self.knots_v, w2)
+        )
+
+    def split_at_v(self, v0: float) -> ("NURBSSurface", "NURBSSurface"):
+        """
+        Splits the NURBS surface at :math:`v=v_0` along the :math:`u`-parametric direction.
+        """
+        if self.has_internal_knots("v"):
+            raise NotImplementedError(
+                "Curve splitting perpendicular to an edge with internal knots is not yet implemented"
+            )
+        Pw = self.get_homogeneous_control_points()
+
+        def de_casteljau(i: int, j: int, k: int) -> np.ndarray:
+            """
+            Based on https://en.wikipedia.org/wiki/De_Casteljau%27s_algorithm. Recursive algorithm where the
+            base case is just the value of the ith original control point.
+
+            Parameters
+            ----------
+            i: int
+                Lower index
+            j: int
+                Upper index
+            k: int
+                Control point row index
+
+            Returns
+            -------
+            np.ndarray
+                A one-dimensional array containing the :math:`x` and :math:`y` values of a control point evaluated
+                at :math:`(i,j)` for a Bézier curve split at the parameter value ``t_split``
+            """
+            if j == 0:
+                return Pw[k, i, :]
+            return de_casteljau(i, j - 1, k) * (1 - v0) + de_casteljau(i + 1, j - 1, k) * v0
+
+        bez_surf_split_1_Pw = np.array([
+            [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
+        ])
+        bez_surf_split_2_Pw = np.array([
+            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
+        ])
+
+        P1, w1 = self.project_homogeneous_control_points(bez_surf_split_1_Pw)
+        P2, w2 = self.project_homogeneous_control_points(bez_surf_split_2_Pw)
+
+        return (
+            NURBSSurface(P1, self.knots_u, self.knots_v, w1),
+            NURBSSurface(P2, self.knots_u, self.knots_v, w2)
+        )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
         """
