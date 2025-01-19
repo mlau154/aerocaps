@@ -169,7 +169,7 @@ class GeometryContainer:
             return list(self._container.keys())
         return [k for k, v in self._container.items() if isinstance(v, geom_type)]
 
-    def plot(self, show: bool = True):
+    def plot(self, show: bool = True, Nu: int = 50, Nv: int = 50):
         """
         Plots all the plottable objects in the container onto a :obj:`pyvista.Plotter` scene.
         Also adds a surface picker to dynamically show surface information on right-click.
@@ -178,6 +178,10 @@ class GeometryContainer:
         ----------
         show: bool
             Whether to show the plot. Default: ``True``
+        Nu: int
+            The number of points in the :math:`u`-direction of each surface to evaluate. Default: ``50``
+        Nv: int
+            The number of points in the :math:`u`-direction of each surface to evaluate. Default: ``50``
         """
         def selection_callback(mesh):
 
@@ -221,7 +225,7 @@ class GeometryContainer:
             if geom.construction:  # Skip the construction geometries
                 continue
             if hasattr(geom, "plot_surface"):
-                grid = geom.plot_surface(plot, 50, 50)
+                grid = geom.plot_surface(plot, Nu, Nv)
                 grid.aerocaps_surf = geom
             if hasattr(geom, "plot"):
                 geom.plot(plot, color="lime")
