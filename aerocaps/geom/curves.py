@@ -491,8 +491,8 @@ class PCurveData3D:
         if isinstance(self.t, float):
             raise ValueError(f"Arc-length calculation is only available for array-type curve data")
         return np.sum(np.sqrt(
-            (self.x[1:] - self.x[:-1]) ** 2,
-            (self.y[1:] - self.y[:-1]) ** 2,
+            (self.x[1:] - self.x[:-1]) ** 2 +
+            (self.y[1:] - self.y[:-1]) ** 2 +
             (self.z[1:] - self.z[:-1]) ** 2
         ))
 
