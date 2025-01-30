@@ -18,7 +18,7 @@ class STLGenerator:
             stl_file.write("solid aerocaps\n")
 
             for geom in self.geoms:
-                point_array = geom.evaluate(self.N, self.N)
+                point_array = geom.evaluate_grid(self.N, self.N)
                 for i in range(point_array.shape[0] - 1):
                     for j in range(point_array.shape[1] - 1):
                         vertex_1 = point_array[i, j, :]
