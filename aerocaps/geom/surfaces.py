@@ -8,19 +8,22 @@ from enum import Enum
 
 import numpy as np
 import pyvista as pv
+import shapely
 from rust_nurbs import *
 from scipy.optimize import fsolve, minimize, OptimizeResult
 
 import aerocaps.iges.curves
 import aerocaps.iges.entity
 import aerocaps.iges.surfaces
+from aerocaps.geom.transformation import transform_points_into_coordinate_system
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
-from aerocaps.geom.curves import BezierCurve3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSplineCurve3D
+from aerocaps.geom.curves import BezierCurve3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSplineCurve3D, \
+    CurveOnParametricSurface, CompositeCurve3D
 from aerocaps.geom.plane import Plane
 from aerocaps.geom.point import Point3D
 from aerocaps.geom.tools import project_point_onto_line, measure_distance_point_line, rotate_point_about_axis, \
-    add_vector_to_point
-from aerocaps.geom.vector import Vector3D
+    add_vector_to_point, concave_hull
+from aerocaps.geom.vector import Vector3D, IHat3D, JHat3D, KHat3D
 from aerocaps.units.angle import Angle
 from aerocaps.units.length import Length
 from aerocaps.utils.array import unique_with_tolerance
@@ -1539,7 +1542,7 @@ class BezierSurface(Surface):
                 d1_self = self.get_first_derivs_along_edge(target_edge, n_points=n_deriv_points)
 
                 # Objective function value update
-                obj_fun_val += np.sum((d1_other[target_edge] + A * d1_self)**2)
+                obj_fun_val += np.sum((d1_other[target_edge] + A * d1_self) ** 2)
 
                 # Jacobian update loop
                 start_xyz = 0
@@ -1835,8 +1838,8 @@ class BezierSurface(Surface):
                 d2_self = self.get_second_derivs_along_edge(target_edge, n_points=n_deriv_points)
 
                 # Objective function value update
-                obj_fun_val += np.sum((d1_other[target_edge] + A * d1_self)**2)
-                obj_fun_val += np.sum((d2_other[target_edge] + A2 * d2_self)**2)
+                obj_fun_val += np.sum((d1_other[target_edge] + A * d1_self) ** 2)
+                obj_fun_val += np.sum((d2_other[target_edge] + A2 * d2_self) ** 2)
 
                 # Jacobian update loop
                 start_xyz = 0  # Jacobian array starting index
@@ -1857,7 +1860,7 @@ class BezierSurface(Surface):
                     for k in range(3):
                         jac_arr[start_xyz + k] += 2 * np.sum(
                             (d1_other[target_edge][:, k] + A * d1_self[:, k]) * A * d1_sens_self[:, k] + (
-                                 d2_other[target_edge][:, k] + A2 * d2_self[:, k]
+                                    d2_other[target_edge][:, k] + A2 * d2_self[:, k]
                             ) * A2 * d2_sens_self[:, k]
                         )
                     # Increment the starting Jacobian index
@@ -1994,7 +1997,8 @@ class BezierSurface(Surface):
             [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
         ])
         bez_surf_split_2_P = np.array([
-            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
+            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in
+            range(self.n_points_v)
         ])
 
         return (
@@ -2044,7 +2048,8 @@ class BezierSurface(Surface):
             [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
         ])
         bez_surf_split_2_P = np.array([
-            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
+            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.n_points_v)] for k in
+            range(self.n_points_u)
         ])
 
         return (
@@ -2531,39 +2536,39 @@ class RationalBezierSurface(Surface):
 
         # Re-orient the curves if necessary
         if not (
-            all(np.isclose(left_cps[-1], top_cps[0])) or
-            all(np.isclose(left_cps[0], top_cps[0]))
+                all(np.isclose(left_cps[-1], top_cps[0])) or
+                all(np.isclose(left_cps[0], top_cps[0]))
         ):
             top_curve = top_curve.reverse()
             if not (
-                all(np.isclose(left_cps[-1], top_cps[-1])) or
-                all(np.isclose(left_cps[0], top_cps[-1]))
+                    all(np.isclose(left_cps[-1], top_cps[-1])) or
+                    all(np.isclose(left_cps[0], top_cps[-1]))
             ):
                 raise ValueError("Top curve and left curve are not connected")
         else:
             if not (
-                all(np.isclose(right_cps[-1], top_cps[-1])) or
-                all(np.isclose(right_cps[0], top_cps[-1])) or
-                all(np.isclose(right_cps[-1], top_cps[0])) or
-                all(np.isclose(right_cps[0], top_cps[0]))
+                    all(np.isclose(right_cps[-1], top_cps[-1])) or
+                    all(np.isclose(right_cps[0], top_cps[-1])) or
+                    all(np.isclose(right_cps[-1], top_cps[0])) or
+                    all(np.isclose(right_cps[0], top_cps[0]))
             ):
                 raise ValueError("Top curve and right curve are not connected")
         if not (
-            all(np.isclose(left_cps[-1], bottom_cps[0])) or
-            all(np.isclose(left_cps[0], bottom_cps[0]))
+                all(np.isclose(left_cps[-1], bottom_cps[0])) or
+                all(np.isclose(left_cps[0], bottom_cps[0]))
         ):
             bottom_curve = bottom_curve.reverse()
             if not (
-                all(np.isclose(left_cps[-1], bottom_cps[-1])) or
-                all(np.isclose(left_cps[0], bottom_cps[-1]))
+                    all(np.isclose(left_cps[-1], bottom_cps[-1])) or
+                    all(np.isclose(left_cps[0], bottom_cps[-1]))
             ):
                 raise ValueError("Bottom curve and left curve are not connected")
         else:
             if not (
-                all(np.isclose(right_cps[-1], bottom_cps[-1])) or
-                all(np.isclose(right_cps[0], bottom_cps[-1])) or
-                all(np.isclose(right_cps[-1], bottom_cps[0])) or
-                all(np.isclose(right_cps[0], bottom_cps[0]))
+                    all(np.isclose(right_cps[-1], bottom_cps[-1])) or
+                    all(np.isclose(right_cps[0], bottom_cps[-1])) or
+                    all(np.isclose(right_cps[-1], bottom_cps[0])) or
+                    all(np.isclose(right_cps[0], bottom_cps[0]))
             ):
                 raise ValueError("Bottom curve and right curve are not connected")
 
@@ -3262,7 +3267,7 @@ class RationalBezierSurface(Surface):
             P_im2_a = other.get_point(row_index, 2, other_surface_edge)
 
             P_i2_b = (2.0 * w_i1_b / w_i2_b * P_i1_b - w_i0_b / w_i2_b * P_i0_b) + f_row ** 2 * n_ratio * (
-                        1 / w_i2_b) * (
+                    1 / w_i2_b) * (
                              w_im_a * P_im_a - 2.0 * w_im1_a * P_im1_a + w_im2_a * P_im2_a)
             self.set_point(P_i2_b, row_index, 2, surface_edge)
 
@@ -3493,8 +3498,8 @@ class RationalBezierSurface(Surface):
                 d2_self = self.get_second_derivs_along_edge(target_edge, n_points=n_deriv_points)
 
                 # Objective function value update
-                obj_fun_val += np.sum((d1_other[target_edge] + A * d1_self)**2)
-                obj_fun_val += np.sum((d2_other[target_edge] + A2 * d2_self)**2)
+                obj_fun_val += np.sum((d1_other[target_edge] + A * d1_self) ** 2)
+                obj_fun_val += np.sum((d2_other[target_edge] + A2 * d2_self) ** 2)
 
                 # Jacobian update loop
                 start_xyz = 0  # Jacobian array starting index
@@ -3515,7 +3520,7 @@ class RationalBezierSurface(Surface):
                     for k in range(3):
                         jac_arr[start_xyz + k] += 2 * np.sum(
                             (d1_other[target_edge][:, k] + A * d1_self[:, k]) * A * d1_sens_self[:, k] + (
-                                 d2_other[target_edge][:, k] + A2 * d2_self[:, k]
+                                    d2_other[target_edge][:, k] + A2 * d2_self[:, k]
                             ) * A2 * d2_sens_self[:, k]
                         )
                     # Increment the starting Jacobian index
@@ -3860,16 +3865,20 @@ class RationalBezierSurface(Surface):
         """
         w = self.weights
         if edge == SurfaceEdge.v1:
-            return np.array(rational_bezier_surf_dsdv_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 1.0)) if perp else np.array(
+            return np.array(
+                rational_bezier_surf_dsdv_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 1.0)) if perp else np.array(
                 rational_bezier_surf_dsdu_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array(rational_bezier_surf_dsdv_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 0.0)) if perp else np.array(
+            return np.array(
+                rational_bezier_surf_dsdv_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 0.0)) if perp else np.array(
                 rational_bezier_surf_dsdu_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array(rational_bezier_surf_dsdu_dp_iso_u(w, i, j, self.n, self.m, 3, 1.0, n_points)) if perp else np.array(
+            return np.array(
+                rational_bezier_surf_dsdu_dp_iso_u(w, i, j, self.n, self.m, 3, 1.0, n_points)) if perp else np.array(
                 rational_bezier_surf_dsdv_dp_iso_u(w, i, j, self.n, self.m, 3, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array(rational_bezier_surf_dsdu_dp_iso_u(w, i, j, self.n, self.m, 3, 0.0, n_points)) if perp else np.array(
+            return np.array(
+                rational_bezier_surf_dsdu_dp_iso_u(w, i, j, self.n, self.m, 3, 0.0, n_points)) if perp else np.array(
                 rational_bezier_surf_dsdv_dp_iso_u(w, i, j, self.n, self.m, 3, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
@@ -3939,16 +3948,20 @@ class RationalBezierSurface(Surface):
         """
         w = self.weights
         if edge == SurfaceEdge.v1:
-            return np.array(rational_bezier_surf_d2sdv2_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 1.0)) if perp else np.array(
+            return np.array(
+                rational_bezier_surf_d2sdv2_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 1.0)) if perp else np.array(
                 rational_bezier_surf_d2sdu2_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 1.0))
         elif edge == SurfaceEdge.v0:
-            return np.array(rational_bezier_surf_d2sdv2_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 0.0)) if perp else np.array(
+            return np.array(
+                rational_bezier_surf_d2sdv2_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 0.0)) if perp else np.array(
                 rational_bezier_surf_d2sdu2_dp_iso_v(w, i, j, self.n, self.m, 3, n_points, 0.0))
         elif edge == SurfaceEdge.u1:
-            return np.array(rational_bezier_surf_d2sdu2_dp_iso_u(w, i, j, self.n, self.m, 3, 1.0, n_points)) if perp else np.array(
+            return np.array(
+                rational_bezier_surf_d2sdu2_dp_iso_u(w, i, j, self.n, self.m, 3, 1.0, n_points)) if perp else np.array(
                 rational_bezier_surf_d2sdv2_dp_iso_u(w, i, j, self.n, self.m, 3, 1.0, n_points))
         elif edge == SurfaceEdge.u0:
-            return np.array(rational_bezier_surf_d2sdu2_dp_iso_u(w, i, j, self.n, self.m, 3, 0.0, n_points)) if perp else np.array(
+            return np.array(
+                rational_bezier_surf_d2sdu2_dp_iso_u(w, i, j, self.n, self.m, 3, 0.0, n_points)) if perp else np.array(
                 rational_bezier_surf_d2sdv2_dp_iso_u(w, i, j, self.n, self.m, 3, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
@@ -4164,7 +4177,8 @@ class RationalBezierSurface(Surface):
             [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
         ])
         bez_surf_split_2_Pw = np.array([
-            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
+            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in
+            range(self.n_points_v)
         ])
 
         transposed_Pw_1 = np.transpose(bez_surf_split_1_Pw, (1, 0, 2))
@@ -4212,7 +4226,8 @@ class RationalBezierSurface(Surface):
             [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
         ])
         bez_surf_split_2_Pw = np.array([
-            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
+            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.n_points_v)] for k in
+            range(self.n_points_u)
         ])
 
         P1, w1 = self.project_homogeneous_control_points(bez_surf_split_1_Pw)
@@ -4339,6 +4354,7 @@ class BSplineSurface(Surface):
     """
     B-spline surface class
     """
+
     def __init__(self,
                  points: typing.List[typing.List[Point3D]] or np.ndarray,
                  knots_u: np.ndarray,
@@ -5398,6 +5414,7 @@ class NURBSSurface(Surface):
     """
     NURBS surface class
     """
+
     def __init__(self,
                  points: typing.List[typing.List[Point3D]] or np.ndarray,
                  knots_u: np.ndarray,
@@ -5562,6 +5579,7 @@ class NURBSSurface(Surface):
         NURBSSurface
             Surface of revolution
         """
+
         def _determine_angle_distribution() -> typing.List[Angle]:
             angle_diff = abs(end_angle.rad - start_angle.rad)
 
@@ -6007,7 +6025,7 @@ class NURBSSurface(Surface):
             return NURBSCurve3D(P[:, -1, :], w[:, -1], self.knots_u, self.degree_u)
 
         raise ValueError(f"Invalid surface edge {surface_edge}")
-    
+
     def is_clamped(self, surface_edge: SurfaceEdge) -> bool:
         """
         Checks if the NURBS surface is clamped along an edge
@@ -6251,7 +6269,7 @@ class NURBSSurface(Surface):
             Tool edge of surface ``other`` which determines the positions of control points along ``surface_edge``
             of the current surface
         """
-        
+
         self.enforce_g0g1(other, f, surface_edge, other_surface_edge)
         n_ratio = (other.get_perpendicular_degree(other_surface_edge) ** 2 -
                    other.get_perpendicular_degree(other_surface_edge)) / (
@@ -6279,7 +6297,7 @@ class NURBSSurface(Surface):
             P_im2_a = other.get_point(row_index, 2, other_surface_edge)
 
             P_i2_b = (2.0 * w_i1_b / w_i2_b * P_i1_b - w_i0_b / w_i2_b * P_i0_b) + f ** 2 * n_ratio * (
-                        1 / w_i2_b) * (
+                    1 / w_i2_b) * (
                              w_im_a * P_im_a - 2.0 * w_im1_a * P_im1_a + w_im2_a * P_im2_a)
             self.set_point(P_i2_b, row_index, 2, surface_edge)
 
@@ -6648,7 +6666,7 @@ class NURBSSurface(Surface):
                 nurbs_surf_d2sdv2_iso_u(P, self.weights, self.knots_u, self.knots_v, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
-        
+
     def verify_g0(self, other: 'NURBSSurface', surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge,
                   n_points: int = 10):
         """ Verifies that two NURBS Surfaces are G0 continuous along their shared edge"""
@@ -6864,7 +6882,8 @@ class NURBSSurface(Surface):
             [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
         ])
         bez_surf_split_2_Pw = np.array([
-            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in range(self.n_points_v)
+            [de_casteljau(i=i, j=self.degree_u - i, k=k) for i in range(self.n_points_u)] for k in
+            range(self.n_points_v)
         ])
 
         transposed_Pw_1 = np.transpose(bez_surf_split_1_Pw, (1, 0, 2))
@@ -6916,7 +6935,8 @@ class NURBSSurface(Surface):
             [de_casteljau(i=0, j=i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
         ])
         bez_surf_split_2_Pw = np.array([
-            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.n_points_v)] for k in range(self.n_points_u)
+            [de_casteljau(i=i, j=self.degree_v - i, k=k) for i in range(self.n_points_v)] for k in
+            range(self.n_points_u)
         ])
 
         P1, w1 = self.project_homogeneous_control_points(bez_surf_split_1_Pw)
@@ -7042,17 +7062,23 @@ class NURBSSurface(Surface):
 class TrimmedSurface(Surface):
     def __init__(self,
                  untrimmed_surface: Surface,
-                 outer_boundary: Geometry3D,
-                 inner_boundaries: typing.List[Geometry3D] = None,
+                 outer_boundary: CompositeCurve3D,
+                 outer_boundary_para: CompositeCurve3D,
+                 outer_curve_on_parametric_surf_para: CurveOnParametricSurface,
+                 inner_boundaries: typing.List[CompositeCurve3D] = None,
+                 inner_boundaries_para: typing.List[CurveOnParametricSurface] = None,
                  name: str = "TrimmedSurface",
                  construction: bool = False):
         """
 
         Parameters
         ----------
-        untrimmed_surface
-        outer_boundary
-        inner_boundaries
+        untrimmed_surface: Surface
+        outer_boundary: CompositeCurve3D
+        outer_boundary_para: CompositeCurve3D
+        outer_curve_on_parametric_surf_para: CurveOnParametricSurface
+        inner_boundaries: typing.List[CompositeCurve3D] or None
+        inner_boundaries_para: typing.List[CurveOnParametricSurface] or None
         name: str
             Name of the geometric object. May be re-assigned a unique name when added to a
             :obj:`~aerocaps.geom.geometry_container.GeometryContainer`
@@ -7062,19 +7088,181 @@ class TrimmedSurface(Surface):
         """
         self.untrimmed_surface = untrimmed_surface
         self.outer_boundary = outer_boundary
+        self.outer_boundary_para = outer_boundary_para
+        self.outer_curve_on_parametric_surf_para = outer_curve_on_parametric_surf_para
         self.inner_boundaries = inner_boundaries
+        self.inner_boundaries_para = inner_boundaries_para
         super().__init__(name=name, construction=construction)
 
-    def evaluate(self, Nu: int, Nv: int) -> np.ndarray:
-        raise NotImplementedError("Evaluation not yet implemented for trimmed surfaces")
+    @classmethod
+    def from_planar_boundary_curves(cls, outer_boundary: CompositeCurve3D) -> "TrimmedSurface":
+        composite_para, planar_surf = cls._get_envelope(outer_boundary)
 
-    def to_iges(self,
-                untrimmed_surface_iges: aerocaps.iges.surfaces.IGESEntity,
-                outer_boundary_iges: aerocaps.iges.curves.CurveOnParametricSurfaceIGES,
-                inner_boundaries_iges: typing.List[aerocaps.iges.curves.CurveOnParametricSurfaceIGES] = None,
-                *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:
-        return aerocaps.iges.surfaces.TrimmedSurfaceIGES(
-            untrimmed_surface_iges,
-            outer_boundary_iges,
-            inner_boundaries_iges
+        curve_on_parametric_surface = CurveOnParametricSurface(
+            planar_surf,
+            composite_para,
+            outer_boundary
         )
+
+        # Create the trimmed surface object
+        return cls(planar_surf, outer_boundary, composite_para, curve_on_parametric_surface)
+
+    @staticmethod
+    def _get_envelope(outer_curves: CompositeCurve3D) -> (CompositeCurve3D, BezierSurface):
+        control_point_loop = []
+        for c_idx, c in enumerate(outer_curves.ordered_curves):
+            if c_idx == 0:
+                control_point_loop.extend(c.control_points)
+            else:
+                control_point_loop.extend(c.control_points[1:])
+        loop_array = np.array([p.as_array() for p in control_point_loop])
+        parametric_curves = []
+
+        # Need to convert to 2-D to use shapely. Get the coordinate system of the plane containing the points
+        # using cross products of vectors described by the points
+        v1, v2 = None, None
+        v3 = Vector3D(p0=Point3D.from_array(np.array([0.0, 0.0, 0.0])),
+                      p1=Point3D.from_array(np.array([0.0, 0.0, 0.0])))
+        t = 0.1
+        while True:
+            if not v3.is_zero_vector():
+                break
+            if t > 0.9:
+                break
+            v1 = Vector3D(
+                outer_curves.ordered_curves[0].evaluate_point3d(0.0),
+                outer_curves.ordered_curves[0].evaluate_point3d(t)
+            )
+            v2 = Vector3D(
+                outer_curves.ordered_curves[0].evaluate_point3d(0.0),
+                outer_curves.ordered_curves[1].evaluate_point3d(t) if len(
+                    outer_curves.ordered_curves) > 1 else outer_curves.ordered_curves[0].evaluate_point3d(t + 0.1)
+            )
+            v3 = v1.cross(v2)
+            t += 0.1
+        else:
+            raise ValueError("Could not compute curve loop plane from input curves")
+
+        v4 = v1.cross(v3)
+
+        # The coordinate system is now fully described by v1, v3, and v4. v1 and v4 are the in-plane components,
+        # while v3 is the out-of-plane component. The origin of this coordinate system is at control_point_loop[0].
+        loop_array_transformed = transform_points_into_coordinate_system(
+            loop_array, [v1, v4, v3], [IHat3D(), JHat3D(), KHat3D()]
+        )
+        # Make sure that all the curves are coplanar
+        if not all([np.isclose(z, loop_array_transformed[0, 2]) for z in loop_array_transformed[1:, 2]]):
+            raise ValueError("Curves are not all coplanar!")
+        loop_array_2d = loop_array_transformed[:, :2]
+        z_plane = loop_array_transformed[0, 2]
+
+        # Create the polygon and find a point representing the center of the polygon while guaranteed to be inside
+        # the polygon
+        polygon = shapely.Polygon(loop_array_2d)
+        envelope_2d = np.array(shapely.envelope(polygon).exterior.coords)
+        x_min, x_max = envelope_2d[:, 0].min(), envelope_2d[:, 0].max()
+        y_min, y_max = envelope_2d[:, 1].min(), envelope_2d[:, 1].max()
+        dx, dy = (x_max - x_min), (y_max - y_min)
+        ds = max(dx, dy)
+        envelope_2d = np.array([
+            [x_min, y_min],
+            [x_min + ds, y_min],
+            [x_min + ds, y_min + ds],
+            [x_min, y_min + ds],
+            [x_min, y_min]
+        ])
+        # envelope_2d[:,]
+
+        # Get parametric curves in the plane defined by the envelope for each curve in the ordered curve list
+        for curve in outer_curves.ordered_curves:
+            cps_transformed = transform_points_into_coordinate_system(
+                curve.get_control_point_array(), [v1, v4, v3], [IHat3D(), JHat3D(), KHat3D()]
+            )
+            cps_x = cps_transformed[:, 0]
+            cps_y = cps_transformed[:, 1]
+            u = [(cp_x - x_min) / ds for cp_x in cps_x]
+            v = [(cp_y - y_min) / ds for cp_y in cps_y]
+            # u = [cp_x - x_min for cp_x in cps_x]
+            # v = [cp_y - y_min for cp_y in cps_y]
+            uv = np.array([u, v]).T
+            uv0 = np.column_stack((uv, np.zeros(uv.shape[0])))
+            if isinstance(curve, Line3D):
+                parametric_curve = curve.__class__(p0=Point3D.from_array(uv0[0, :]), p1=Point3D.from_array(uv0[1, :]))
+            elif isinstance(curve, BezierCurve3D):
+                parametric_curve = curve.__class__(uv0)
+            elif isinstance(curve, BSplineCurve3D):
+                parametric_curve = curve.__class__(uv0, curve.knot_vector, curve.degree)
+            elif isinstance(curve, RationalBezierCurve3D):
+                # w = np.array([np.min(curve.weights) + ds * (np.max(curve.weights) - np.min(curve.weights)) for weight in curve.weights])
+                parametric_curve = curve.__class__(uv0, curve.weights * ds)  # * ds
+            elif isinstance(curve, NURBSCurve3D):
+                parametric_curve = curve.__class__(uv0, curve.weights, curve.knot_vector, curve.degree)
+            else:
+                raise ValueError(f"Invalid curve type {type(curve)}")
+            parametric_curves.append(parametric_curve)
+
+        envelope_3d = np.column_stack((envelope_2d, z_plane * np.ones(envelope_2d.shape[0])))
+
+        # Transform the newly created envelope back into the original coordinate system
+        reverse_transformed_envelope_3d = transform_points_into_coordinate_system(
+            envelope_3d, [IHat3D(), JHat3D(), KHat3D()], [v1, v4, v3]
+        )
+
+        # Create a planar rectangular surface from the transformed points
+        pa = Point3D.from_array(reverse_transformed_envelope_3d[0, :])
+        pb = Point3D.from_array(reverse_transformed_envelope_3d[1, :])
+        pc = Point3D.from_array(reverse_transformed_envelope_3d[2, :])
+        pd = Point3D.from_array(reverse_transformed_envelope_3d[3, :])
+        planar_surf = BezierSurface([[pa, pd], [pb, pc]])
+
+        return CompositeCurve3D(parametric_curves), planar_surf
+
+    def evaluate(self, Nt: int) -> np.ndarray:
+        if self.inner_boundaries is not None:
+            raise NotImplementedError("Evaluation not yet implemented for trimmed surfaces with inner loops")
+        uv_locs = self.outer_boundary_para.evaluate(Nt)[:, :2]
+        points, lines = concave_hull(uv_locs)
+        surf_points = np.array([self.untrimmed_surface.evaluate(p[0], p[1]) for p in points])
+        return surf_points, lines
+
+    def plot_surface(self, plot: pv.Plotter, Nt: int = 100, **mesh_kwargs):
+        """
+        Plots the trimmed surface using the `pyvista <https://pyvista.org/>`_ library
+
+        Parameters
+        ----------
+        plot:
+            :obj:`pyvista.Plotter` instance
+        Nt: int
+            Number of points to evaluate on each boundary curve. Default: ``100``
+        mesh_kwargs:
+            Keyword arguments to pass to :obj:`pyvista.Plotter.add_mesh`
+
+        Returns
+        -------
+        pyvista.core.pointset.StructuredGrid
+            The evaluated rational Bézier surface
+        """
+        surf_points, lines = self.evaluate(Nt)
+        faces = np.hstack(np.insert(lines, 0, 3, axis=1))
+        mesh = pv.PolyData(surf_points, faces=faces)
+        plot.add_mesh(mesh, **mesh_kwargs)
+        return mesh
+
+    def to_iges(self, *args, **kwargs) -> typing.List[aerocaps.iges.entity.IGESEntity]:
+
+        # Compile the list of entities
+        K1 = len(self.outer_boundary.ordered_curves)
+        K2 = K1 + len(self.outer_boundary_para.ordered_curves)
+        entities = [curve.to_iges() for curve in self.outer_boundary.ordered_curves]
+        entities.extend([curve.to_iges() for curve in self.outer_boundary_para.ordered_curves])
+        entities.append(self.outer_boundary.to_iges(entities[0:K1]))
+        entities.append(self.outer_boundary_para.to_iges(entities[K1:K2]))
+        entities.append(self.untrimmed_surface.to_iges())
+        entities.append(self.outer_curve_on_parametric_surf_para.to_iges(entities[K2 + 2], entities[K2 + 1], entities[K2]))
+        entities.append(aerocaps.iges.surfaces.TrimmedSurfaceIGES(
+            entities[K2 + 2],
+            entities[K2 + 3],
+            outer_boundary_is_boundary_of_surface=True
+        ))
+        return entities

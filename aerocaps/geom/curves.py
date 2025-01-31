@@ -4,6 +4,7 @@ two- or three-dimensional space)
 """
 import typing
 from abc import abstractmethod
+from copy import deepcopy
 
 import numpy as np
 import pyvista as pv
@@ -1700,6 +1701,301 @@ class BezierCurve3D(PCurve3D):
             ax.add_lines(np.array(arr), **plt_kwargs)
 
 
+class RationalBezierCurve2D(PCurve2D):
+    """Two-dimensional rational Bézier curve class"""
+    def __init__(self, control_points: typing.List[Point2D] or np.ndarray, weights: np.ndarray,
+                 name: str = "RationalBezierCurve3D", construction: bool = False):
+        """
+        Creates a two-dimensional rational Bézier curve objects from a list of control points and weights
+
+        Parameters
+        ----------
+        control_points: typing.List[Point2D] or numpy.ndarray
+            Control points for the rational Bézier curve
+        weights: numpy.ndarray
+            Weights for the control points. Must have the same length as the control point array
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'RationalBezierCurve2D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
+        self.control_points = [Point2D.from_array(p) for p in control_points] if isinstance(
+            control_points, np.ndarray) else control_points
+        assert weights.ndim == 1
+        assert len(control_points) == len(weights)
+
+        # Negative weight check
+        for weight in weights:
+            if weight < 0:
+                raise NegativeWeightError("All weights must be non-negative")
+
+        self.dim = 2
+        self.weights = np.array(weights)
+        self.knot_vector = np.zeros(2 * len(control_points))
+        self.knot_vector[len(control_points):] = 1.0
+        self.degree = len(control_points) - 1
+        assert self.knot_vector.ndim == 1
+        assert len(self.knot_vector) == len(control_points) + self.degree + 1
+        super().__init__(name=name, construction=construction)
+
+    def reverse(self) -> "RationalBezierCurve2D":
+        return self.__class__(self.control_points[::-1],
+                              self.weights[::-1])
+
+    def elevate_degree(self) -> "RationalBezierCurve2D":
+        """
+        Elevates the degree of the rational Bézier curve. Uses the same algorithm as degree elevation of a
+        non-rational Bézier curve with a necessary additional step of conversion to/from
+        `homogeneous coordinates <https://en.wikipedia.org/wiki/Homogeneous_coordinates>`_.
+
+        .. figure:: ../images/quarter_circle_degree_elevation.*
+            :width: 350
+            :align: center
+
+            Degree elevation of a quarter circle exactly represented by a rational Bézier curve
+
+        Returns
+        -------
+        RationalBezierCurve3D
+            A new rational Bézier curve with identical shape to the current one but with one additional control point.
+        """
+        n = self.degree
+        Pw = self.get_homogeneous_control_points()
+
+        # New array has one additional control point (current array only has n+1 control points)
+        new_homogeneous_control_points = np.zeros((Pw.shape[0] + 1, Pw.shape[1]))
+
+        # Set starting and ending control points to what they already were
+        new_homogeneous_control_points[0, :] = Pw[0, :]
+        new_homogeneous_control_points[-1, :] = Pw[-1, :]
+
+        # Update all the other control points
+        for i in range(1, n + 1):  # 1 <= i <= n
+            new_homogeneous_control_points[i, :] = i / (n + 1) * Pw[i - 1, :] + (1 - i / (n + 1)) * Pw[i, :]
+
+        # Project the homogeneous control points onto the w=1 hyperplane
+        new_weights = new_homogeneous_control_points[:, -1]
+        new_control_points = new_homogeneous_control_points[:, :-1] / np.repeat(new_weights[:, np.newaxis],
+                                                                                self.dim, axis=1)
+
+        return RationalBezierCurve2D(new_control_points, new_weights)
+
+    def get_control_point_array(self, unit: str = "m") -> np.ndarray:
+        r"""
+        Gets an array representation of the control points
+
+        Parameters
+        ----------
+        unit: str
+            Physical length unit used to determine the output array. Default: ``"m"``
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n+1)\times 2` where :math:`n` is the curve degree
+        """
+        return np.array([p.as_array(unit=unit) for p in self.control_points])
+
+    def get_homogeneous_control_points(self) -> np.ndarray:
+        r"""
+        Gets the array of control points in homogeneous coordinates, :math:`\mathbf{P}_i \cdot w_i`
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of size :math:`(n + 1) \times 3`, where :math:`n` is the curve degree. The three columns, in order,
+            represent the :math:`x`-coordinate, :math:`y`-coordinate, and weight of each
+            control point.
+        """
+        return np.column_stack((
+            self.get_control_point_array() * np.repeat(self.weights[:, np.newaxis], self.dim, axis=1),
+            self.weights
+        ))
+
+    @classmethod
+    def generate_from_array(cls, P: np.ndarray, weights: np.ndarray):
+        return cls([Point2D(x=Length(m=xy[0]), y=Length(m=xy[1])) for xy in P], weights)
+
+    def evaluate(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        w = self.weights
+        if isinstance(t, float):
+            return np.array(rational_bezier_curve_eval(P, w, t))
+        if isinstance(t, int):
+            return np.array(rational_bezier_curve_eval_grid(P, w, t))
+        return np.array(rational_bezier_curve_eval_tvec(P, w, t))
+
+    def evaluate_point2d(self, t: float or int or np.ndarray) -> Point2D or typing.List[Point2D]:
+        curve = self.evaluate(t)
+        if curve.ndim == 1:
+            return Point2D.from_array(curve)
+        return [Point2D.from_array(curve_point) for curve_point in curve]
+
+    def dcdt(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        w = self.weights
+        if isinstance(t, float):
+            return np.array(rational_bezier_curve_dcdt(P, w, t))
+        if isinstance(t, int):
+            return np.array(rational_bezier_curve_dcdt_grid(P, w, t))
+        return np.array(rational_bezier_curve_dcdt_tvec(P, w, t))
+
+    def d2cdt2(self, t: float or int or np.ndarray) -> np.ndarray:
+        P = self.get_control_point_array()
+        w = self.weights
+        if isinstance(t, float):
+            return np.array(rational_bezier_curve_d2cdt2(P, w, t))
+        if isinstance(t, int):
+            return np.array(rational_bezier_curve_d2cdt2_grid(P, w, t))
+        return np.array(rational_bezier_curve_d2cdt2_tvec(P, w, t))
+
+    def evaluate_pcurvedata(self, t: float or int or np.ndarray) -> PCurveData2D:
+        xy = self.evaluate(t)
+        xpyp = self.dcdt(t)
+        xppypp = self.d2cdt2(t)
+        return PCurveData2D(
+            t=t,
+            x=xy[:, 0], y=xy[:, 1],
+            xp=xpyp[:, 0], yp=xpyp[:, 1],
+            xpp=xppypp[:, 0], ypp=xppypp[:, 1]
+        )
+
+    def compute_t_corresponding_to_x(self, x_seek: float, t0: float = 0.5):
+        r"""
+        Computes the :math:`t`-value corresponding to a given :math:`x`-value
+
+        Parameters
+        ----------
+        x_seek: float
+            :math:`x`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
+
+        Returns
+        -------
+        float
+            :math:`t`-value corresponding to ``x_seek``
+        """
+
+        def bez_root_find_func(t):
+            point = self.evaluate_point2d(t[0])
+            return np.array([point.x.m - x_seek])
+
+        return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
+
+    def compute_t_corresponding_to_y(self, y_seek: float, t0: float = 0.5):
+        r"""
+        Computes the :math:`t`-value corresponding to a given :math:`y`-value
+
+        Parameters
+        ----------
+        y_seek: float
+            :math:`y`-value
+        t0: float
+            Initial guess for the output :math:`t`-value. Default: ``0.5``
+
+        Returns
+        -------
+        float
+            :math:`t`-value corresponding to ``y_seek``
+        """
+
+        def bez_root_find_func(t):
+            point = self.evaluate_point2d(t[0])
+            return np.array([point.y.m - y_seek])
+
+        return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
+
+    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, nt: int = 201, **plt_kwargs):
+        """
+        Plots the curve on a :obj:`matplotlib.pyplot.Axes` or a `pyvista.Plotter` window
+
+        Parameters
+        ----------
+        ax: plt.Axes or pv.Plotter
+            Axes/window on which to plot
+        projection: str
+            Projection on which to plot (either 'XY', 'YZ', 'XZ', or 'XYZ' for a 3-D plot). Only used if
+            ``ax`` is a ``plt.Axes``. Defaults to 'XYZ' if not specified. Default: ``None``
+        nt: int
+            Number of evenly-spaced parameter values to plot. Default: ``201``
+        plt_kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot` or
+            :obj:`pyvista.Plotter.add_lines`
+        """
+        projection = "XYZ" if projection is None else projection
+        t_vec = np.linspace(0.0, 1.0, nt)
+        data = self.evaluate(t_vec)
+        args = tuple([data[:, _projection_dict[axis]] for axis in projection])
+
+        if isinstance(ax, plt.Axes):
+            ax.plot(*args, **plt_kwargs)
+        elif isinstance(ax, pv.Plotter):
+            arr = [data[0]]
+            for row in data[1:-1]:
+                arr.append(row)
+                arr.append(row)
+            arr.append(data[-1])
+            ax.add_lines(np.array(arr), **plt_kwargs)
+
+    def plot_control_points(self, ax: plt.Axes, projection: str = None, **plt_kwargs):
+        """
+        Plots the control points on a :obj:`matplotlib.pyplot.Axes`
+
+        Parameters
+        ----------
+        ax: plt.Axes or pv.Plotter
+            Axes/window on which to plot
+        projection: str
+            Projection on which to plot (either 'XY', 'YZ', 'XZ', or 'XYZ' for a 3-D plot). Only used if
+            ``ax`` is a ``plt.Axes``. Defaults to 'XYZ' if not specified. Default: ``None``
+        plt_kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot` or
+            :obj:`pyvista.Plotter.add_lines`
+        """
+        projection = "XYZ" if projection is None else projection
+        cps = self.get_control_point_array()
+        args = tuple([cps[:, _projection_dict[axis]] for axis in projection])
+        ax.plot(*args, **plt_kwargs)
+
+    def enforce_g0(self, other: "RationalBezierCurve2D"):
+        other.control_points[0] = self.control_points[-1]
+
+    def enforce_c0(self, other: "RationalBezierCurve2D"):
+        self.enforce_g0(other)
+
+    def enforce_g0g1(self, other: "RationalBezierCurve2D", f: float):
+        self.enforce_g0(other)
+        n_ratio = self.degree / other.degree
+        w_ratio_a = self.weights[-2] / self.weights[-1]
+        w_ratio_b = other.weights[0] / other.weights[1]
+        other.control_points[1] = other.control_points[0] + f * n_ratio * w_ratio_a * w_ratio_b * (self.control_points[-1] - self.control_points[-2])
+
+    def enforce_c0c1(self, other: "RationalBezierCurve2D"):
+        self.enforce_g0g1(other, f=1.0)
+
+    def enforce_g0g1g2(self, other: "RationalBezierCurve2D", f: float):
+        self.enforce_g0g1(other, f)
+        n_ratio_1 = self.degree / other.degree
+        n_ratio_2 = (self.degree - 1) / (other.degree - 1)
+        n_ratio_3 = 1 / (other.degree - 1)
+        w_ratio_1 = self.weights[-3] / self.weights[-1]
+        w_ratio_2 = other.weights[0] / other.weights[2]
+        w_ratio_3 = self.weights[-2] / self.weights[-1]
+        w_ratio_4 = other.weights[1] / other.weights[0]
+        other.control_points[2] = other.control_points[1] + f ** 2 * n_ratio_1 * n_ratio_2 * w_ratio_1 * w_ratio_2 * (
+                self.control_points[-3] - self.control_points[-2]) - f ** 2 * n_ratio_1 * n_ratio_3 * w_ratio_2 * (
+                2 * self.degree * w_ratio_3**2 - (self.degree - 1) * w_ratio_1 - 2 * w_ratio_3) * (
+                                          self.control_points[-2] - self.control_points[-1]) + n_ratio_3 * w_ratio_2 * (
+                2 * other.degree * w_ratio_4**2 - (other.degree - 1) * w_ratio_2**-1 - 2 * w_ratio_4) * (
+                                          other.control_points[1] - other.control_points[0])
+
+    def enforce_c0c1c2(self, other: "RationalBezierCurve2D"):
+        self.enforce_g0g1g2(other, f=1.0)
+
+
 class RationalBezierCurve3D(PCurve3D):
     """Three-dimensional rational Bézier curve class"""
     def __init__(self, control_points: typing.List[Point3D] or np.ndarray, weights: np.ndarray,
@@ -2275,14 +2571,116 @@ class NURBSCurve3D(PCurve3D):
         )
 
 
-class CompositeCurve3D(Geometry3D):
-    def __init__(self, curves: typing.List[PCurve3D],
-                 name: str = "CompositeCurve3D", construction: bool = False):
+class CompositeCurve2D(Geometry2D):
+    """Two-dimensional composite curve class"""
+    def __init__(self, curves: typing.List[PCurve2D],
+                 name: str = "CompositeCurve2D", construction: bool = False):
         """
+        Two-dimensional composite curve (list of two-dimensional curves connected end-to-end)
 
         Parameters
         ----------
-        curves
+        curves: typing.List[PCurve2D]
+            List of connected curves
+        name: str
+            Name of the geometric object. May be re-assigned a unique name when added to a
+            :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'CompositeCurve2D'
+        construction: bool
+            Whether this is a geometry used only for construction of other geometries. If ``True``, this
+            geometry will not be exported or plotted. Default: ``False``
+        """
+        self._validate(curves)
+        self._unordered_curves = curves
+        self._ordered_curves = self._get_ordered_curve_list()
+        super().__init__(name=name, construction=construction)
+
+    @property
+    def unordered_curves(self) -> typing.List[PCurve2D]:
+        return self._unordered_curves
+
+    @property
+    def ordered_curves(self) -> typing.List[PCurve2D]:
+        return self._ordered_curves
+
+    @staticmethod
+    def _validate(unordered_curves: typing.List[PCurve2D]) -> bool:
+        """
+        Validates that the set of curves is connected end-to-end
+
+        Parameters
+        ----------
+        unordered_curves: typing.List[PCurve2D]
+            Unordered list of curves
+
+        Returns
+        -------
+        bool
+            Whether the list is closed (not whether the set of curves is connected; an
+            exception is raised instead if this is not the case)
+        """
+        endpoints = {}
+        for curve in unordered_curves:
+            endpoint_1 = curve.evaluate_point2d(0.0)
+            endpoint_2 = curve.evaluate_point2d(1.0)
+            for endpoint_to_test in [endpoint_1, endpoint_2]:
+                for endpoint in endpoints:
+                    if endpoint.almost_equals(endpoint_to_test):
+                        endpoints[endpoint] = True
+                        break
+                else:
+                    endpoints[endpoint_to_test] = False
+
+        unconnected_endpoint_counter = 0
+        for v in endpoints.values():
+            if v:
+                continue
+            else:
+                unconnected_endpoint_counter += 1
+
+        if unconnected_endpoint_counter > 1:
+            raise ValueError("Curve loop is not connected end to end")
+        elif unconnected_endpoint_counter == 1:
+            return False
+        return True
+
+    def _get_ordered_curve_list(self) -> (
+            typing.List[BezierCurve2D or RationalBezierCurve2D or Line2D]):
+        # Copy a list of the curves
+        curve_stack = deepcopy(self.unordered_curves)
+        ordered_curves = [deepcopy(curve_stack[0])]
+
+        while curve_stack:  # Loop until the curve stack is empty
+            for curve_idx, curve in enumerate(curve_stack):
+                if ordered_curves[-1].evaluate_point2d(1.0).almost_equals(
+                        curve.evaluate_point2d(0.0)):
+                    ordered_curves.append(curve)
+                    break  # Go to the next curve in the stack
+                elif ordered_curves[-1].evaluate_point2d(1.0).almost_equals(
+                        curve.evaluate_point2d(1.0)):
+                    ordered_curves.append(curve.reverse())
+                    break  # Go to the next curve in the stack
+
+        return ordered_curves
+
+    def evaluate(self, Nt: int) -> np.ndarray:
+        return np.vstack(tuple([
+            curve.evaluate(Nt) if c_idx == 0 else curve.evaluate(Nt)[1:, :]
+            for c_idx, curve in enumerate(self.ordered_curves)
+        ]))
+
+
+class CompositeCurve3D(Geometry3D):
+    """Three-dimensional composite curve class"""
+
+    def __init__(self, curves: typing.List[PCurve3D],
+                 name: str = "CompositeCurve3D", construction: bool = False):
+        """
+        Three-dimensional composite curve (list of three-dimensional curves connected end-to-end)
+
+        Parameters
+        ----------
+        curves: typing.List[PCurve3D]
+            List of connected curves
         name: str
             Name of the geometric object. May be re-assigned a unique name when added to a
             :obj:`~aerocaps.geom.geometry_container.GeometryContainer`. Default: 'CompositeCurve3D'
@@ -2290,8 +2688,86 @@ class CompositeCurve3D(Geometry3D):
             Whether this is a geometry used only for construction of other geometries. If ``True``, this
             geometry will not be exported or plotted. Default: ``False``
         """
-        self.curves = curves
+        self._validate(curves)
+        self._unordered_curves = curves
+        self._ordered_curves = self._get_ordered_curve_list()
         super().__init__(name=name, construction=construction)
+
+    @property
+    def unordered_curves(self) -> typing.List[PCurve3D]:
+        return self._unordered_curves
+
+    @property
+    def ordered_curves(self) -> typing.List[PCurve3D]:
+        return self._ordered_curves
+
+    @staticmethod
+    def _validate(unordered_curves: typing.List[PCurve3D]) -> bool:
+        """
+        Validates that the set of curves is connected end-to-end
+
+        Parameters
+        ----------
+        unordered_curves: typing.List[PCurve3D]
+            Unordered list of curves
+
+        Returns
+        -------
+        bool
+            Whether the list is closed (not whether the set of curves is connected; an
+            exception is raised instead if this is not the case)
+        """
+        endpoints = {}
+        for curve in unordered_curves:
+            endpoint_1 = curve.evaluate_point3d(0.0)
+            endpoint_2 = curve.evaluate_point3d(1.0)
+            for endpoint_to_test in [endpoint_1, endpoint_2]:
+                for endpoint in endpoints:
+                    if endpoint.almost_equals(endpoint_to_test):
+                        endpoints[endpoint] = True
+                        break
+                else:
+                    endpoints[endpoint_to_test] = False
+
+        unconnected_endpoint_counter = 0
+        for v in endpoints.values():
+            if v:
+                continue
+            else:
+                unconnected_endpoint_counter += 1
+
+        if unconnected_endpoint_counter > 1:
+            raise ValueError("Curve loop is not connected end to end")
+        elif unconnected_endpoint_counter == 1:
+            return False
+        return True
+
+    def _get_ordered_curve_list(self) -> (
+            typing.List[BezierCurve3D or RationalBezierCurve3D or BSplineCurve3D or NURBSCurve3D or Line3D]):
+        # Copy a list of the curves
+        curve_stack = deepcopy(self.unordered_curves)
+        ordered_curves = [deepcopy(curve_stack[0])]
+
+        while curve_stack:  # Loop until the curve stack is empty
+            for curve_idx, curve in enumerate(curve_stack):
+                if ordered_curves[-1].evaluate_point3d(1.0).almost_equals(
+                        curve.evaluate_point3d(0.0)):
+                    ordered_curves.append(curve)
+                    curve_stack.pop(curve_idx)
+                    break  # Go to the next curve in the stack
+                elif ordered_curves[-1].evaluate_point3d(1.0).almost_equals(
+                        curve.evaluate_point3d(1.0)):
+                    ordered_curves.append(curve.reverse())
+                    curve_stack.pop(curve_idx)
+                    break  # Go to the next curve in the stack
+
+        return ordered_curves
+
+    def evaluate(self, Nt: int) -> np.ndarray:
+        return np.vstack(tuple([
+            curve.evaluate(Nt) if c_idx == 0 else curve.evaluate(Nt)[1:, :]
+            for c_idx, curve in enumerate(self.ordered_curves)
+        ]))
 
     def to_iges(self, curve_iges_entities: typing.List[aerocaps.iges.entity.IGESEntity],
                 *args, **kwargs) -> aerocaps.iges.entity.IGESEntity:

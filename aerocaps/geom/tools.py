@@ -1,4 +1,6 @@
 import numpy as np
+import shapely
+import triangle
 from scipy.optimize import minimize_scalar
 
 from aerocaps.geom.curves import BezierCurve3D, PCurve2D, PCurve3D, Line3D
@@ -18,7 +20,8 @@ __all__ = [
     "find_t_corresponding_to_minimum_distance_to_point3d",
     "sweep_along_curve",
     "rotate_about_axis",
-    "rotate_point_about_axis"
+    "rotate_point_about_axis",
+    "concave_hull"
 ]
 
 
@@ -120,3 +123,48 @@ def rotate_point_about_axis(p: Point3D, ax: Line3D, angle: Angle) -> Point3D:
     p_mat = rotate_about_axis(p_mat, ax.get_vector(), angle)
     p_mat = forward_transformation.transform(p_mat)
     return Point3D.from_array(p_mat[0])
+
+
+def concave_hull(poly: np.ndarray) -> (np.ndarray, np.ndarray):
+    r"""
+    Gets the concave hull of points of a polygon. Has a worst-case time complexity of
+    :math:`\mathcal{O}\left(3n^2 \right)` but uses ``shapely.prepare`` for increased performance.
+    Some algorithms exist that are :math:`\mathcal{O}\left( n \log{n} \right)`, but this algorithm seems to be more
+    robust and is fast enough in many cases.
+
+    Parameters
+    ----------
+    poly: numpy.ndarray
+        Array of size :math:`2 \times N` representing the polygon. Does not need to form a closed loop
+
+    Returns
+    -------
+    numpy.ndarray, numpy.ndarray
+        The vertices of the triangles as an :math:`N \times 3` index array and the points of the triangles
+        as an :math:`N \times 3` float array
+    """
+    segments = np.array([[i, i + 1] for i in range(poly.shape[0] - 1)])
+    tri = triangle.triangulate({"vertices": poly, "segments": segments})
+    vertices = tri['vertices']
+    triangles = tri['triangles']
+
+    # Get a buffered version of a polygon defined by the airfoil points.
+    # This helps avoid floating point precision issues with the shapely `contains` method
+    shapely_poly = shapely.Polygon(poly).buffer(1e-11)
+    shapely.prepare(shapely_poly)  # Decreases runtime by about 60%
+
+    # Get the triangles outside the airfoil polygon
+    triangles_to_remove = []
+    for tri_idx, tri_indices in enumerate(triangles):
+        for edge_pair_combo in [[0, 1], [1, 2], [2, 0]]:
+            xy = np.mean((vertices[tri_indices[edge_pair_combo[0]]],
+                          vertices[tri_indices[edge_pair_combo[1]]]), axis=0)
+            if not shapely.contains(shapely_poly, shapely.Point(xy[0], xy[1])):
+                triangles_to_remove.append(tri_idx)
+                break
+
+    # Remove these triangles to obtain a triangulated concave hull
+    for triangles_to_remove in triangles_to_remove[::-1]:
+        triangles = np.delete(triangles, triangles_to_remove, axis=0)
+
+    return vertices, triangles

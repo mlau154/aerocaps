@@ -7,3 +7,4 @@ pyvista
 pyiges
 shapely
 rust-nurbs>=0.23
+triangle

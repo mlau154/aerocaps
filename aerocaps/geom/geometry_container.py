@@ -225,8 +225,11 @@ class GeometryContainer:
             if geom.construction:  # Skip the construction geometries
                 continue
             if hasattr(geom, "plot_surface"):
-                grid = geom.plot_surface(plot, Nu, Nv)
-                grid.aerocaps_surf = geom
+                try:
+                    grid = geom.plot_surface(plot, Nu, Nv)
+                    grid.aerocaps_surf = geom
+                except TypeError:
+                    grid = geom.plot_surface(plot, Nt=Nu)
             if hasattr(geom, "plot"):
                 geom.plot(plot, color="lime")
 
@@ -256,8 +259,17 @@ class GeometryContainer:
             Physical length units used to export the geometries. See
             :obj:`aerocaps.iges.iges_generator.IGESGenerator.__init__` for more details. Default: ``"meters"``
         """
-        geoms_to_export = [
-            geom.to_iges() for geom in self._container.values() if not geom.construction and hasattr(geom, "to_iges")
-        ]
+        geoms_to_export = []
+        for geom in self._container.values():
+            if geom.construction:
+                continue
+            if not hasattr(geom, "to_iges") or (isinstance(geom, list) and not hasattr(geom, "to_iges")):
+                continue
+            entities = geom.to_iges()
+            if isinstance(entities, list):
+                geoms_to_export.extend(entities)
+            else:
+                geoms_to_export.append(entities)
+
         iges_generator = IGESGenerator(geoms_to_export, units)
         iges_generator.generate(file_name)

@@ -43,6 +43,9 @@ class Vector2D:
     def from_array(cls, arr: np.ndarray):
         return cls(p0=Origin2D(), p1=Point2D.from_array(arr))
 
+    def is_zero_vector(self) -> bool:
+        return np.all(np.isclose(self.as_array(), 0.0))
+
     def dot(self, other: "Vector2D") -> float or Unit:
         A = self.value()
         B = other.value()
@@ -82,6 +85,9 @@ class Vector3D:
 
     def as_array(self):
         return np.array([xyz.m for xyz in self.value()])
+
+    def is_zero_vector(self) -> bool:
+        return np.all(np.isclose(self.as_array(), 0.0))
 
     @classmethod
     def from_array(cls, arr: np.ndarray):
