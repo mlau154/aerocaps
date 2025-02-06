@@ -2605,13 +2605,13 @@ class RationalBezierSurface(Surface):
         for Pw_slice, curve_Pw in zip(Pw[1:-1], bottom_cps[1:-1]):
             displacement = curve_Pw - Pw_slice[0]
             for i in range(left_curve.degree):
-                Pw_slice[i] += ((left_curve.degree - i) / left_curve.degree) ** 3 * displacement
+                Pw_slice[i] += ((left_curve.degree - i) / left_curve.degree) * displacement
 
         # Displace the control points associated with the bottom side of the surface
         for Pw_slice, curve_Pw in zip(Pw[1:-1], top_cps[1:-1]):
             displacement = curve_Pw - Pw_slice[-1]
             for i in range(left_curve.degree):
-                Pw_slice[-1 - i] += ((left_curve.degree - i) / left_curve.degree) ** 3 * displacement
+                Pw_slice[-1 - i] += ((left_curve.degree - i) / left_curve.degree) * displacement
 
         # Project the new homogeneous control points onto the w=1 hyperplane
         new_points, new_weights = RationalBezierSurface.project_homogeneous_control_points(Pw)
