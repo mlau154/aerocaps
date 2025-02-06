@@ -2472,7 +2472,8 @@ class RationalBezierSurface(Surface):
     def fill_surface_from_four_boundaries(left_curve: BezierCurve3D or RationalBezierCurve3D,
                                           right_curve: BezierCurve3D or RationalBezierCurve3D,
                                           top_curve: BezierCurve3D or RationalBezierCurve3D,
-                                          bottom_curve: BezierCurve3D or RationalBezierCurve3D) -> "RationalBezierSurface":
+                                          bottom_curve: BezierCurve3D or RationalBezierCurve3D,
+                                          displacement_degree: int = 3) -> "RationalBezierSurface":
         """
         Creates a fill surface from four boundary curves by linearly interpolating the ``left_curve`` and
         ``right_curve`` and displacing the edges created by the interpolation to form the ``top_curve``
@@ -2499,6 +2500,9 @@ class RationalBezierSurface(Surface):
             Top boundary curve
         bottom_curve: Bezier3D or RationalBezierCurve3D
             Bottom boundary curve
+        displacement_degree: int
+            Degree of function used to displace the surface control points to accommodate the top and bottom surfaces.
+            Default: 3
 
         Returns
         -------
@@ -2605,13 +2609,13 @@ class RationalBezierSurface(Surface):
         for Pw_slice, curve_Pw in zip(Pw[1:-1], bottom_cps[1:-1]):
             displacement = curve_Pw - Pw_slice[0]
             for i in range(left_curve.degree):
-                Pw_slice[i] += ((left_curve.degree - i) / left_curve.degree) * displacement
+                Pw_slice[i] += ((left_curve.degree - i) / left_curve.degree) ** displacement_degree * displacement
 
         # Displace the control points associated with the bottom side of the surface
         for Pw_slice, curve_Pw in zip(Pw[1:-1], top_cps[1:-1]):
             displacement = curve_Pw - Pw_slice[-1]
             for i in range(left_curve.degree):
-                Pw_slice[-1 - i] += ((left_curve.degree - i) / left_curve.degree) * displacement
+                Pw_slice[-1 - i] += ((left_curve.degree - i) / left_curve.degree) ** displacement_degree * displacement
 
         # Project the new homogeneous control points onto the w=1 hyperplane
         new_points, new_weights = RationalBezierSurface.project_homogeneous_control_points(Pw)

@@ -138,7 +138,7 @@ def case_6(N: int) -> (typing.List[float], str):
         [0.8, 1.2, 0.0],
         [1.0, 1.1, 0.0]
     ])
-    bez = ac.BezierCurve3D.generate_from_array(bez_P)
+    bez = ac.BezierCurve3D(bez_P)
     ax = ac.Line3D(p0=ac.Point3D.from_array(np.array([0.0, 0.0, 0.0])),
                    p1=ac.Point3D.from_array(np.array([1.0, 0.0, 0.0])))
     Nu, Nv = N, N
@@ -177,7 +177,7 @@ def case_7(N: int) -> (typing.List[float], str):
         [0.9, 1.1, 0.0],
         [1.0, 1.1, 0.0]
     ])
-    bez = ac.BezierCurve3D.generate_from_array(bez_P)
+    bez = ac.BezierCurve3D(bez_P)
     ax = ac.Line3D(p0=ac.Point3D.from_array(np.array([0.0, 0.0, 0.0])),
                    p1=ac.Point3D.from_array(np.array([1.0, 0.0, 0.0])))
     Nu, Nv = N, N
@@ -231,7 +231,7 @@ def main():
     ax.legend(prop=dict(size=16))
 
     fig.set_tight_layout(True)
-    fig.savefig("python-rust-speed-comparison.png", dpi=300, bbox_inches="tight")
+    # fig.savefig("python-rust-speed-comparison.png", dpi=300, bbox_inches="tight")
 
     plt.show()
 
