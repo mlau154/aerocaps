@@ -277,12 +277,12 @@ class GeometryContainer:
 
     def export_stl(self, file_name: str, Nu: int = 50, Nv: int = 50):
         """
-        Exports all the exportable objects in the container to an IGES file
+        Exports all the exportable objects in the container to an STL file
 
         Parameters
         ----------
         file_name: str
-            Path to the IGES file
+            Path to the STL file
         Nu: int
             Number of points to evaluate in the :math:`u`-parametric direction
         Nv: int
