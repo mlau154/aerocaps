@@ -7,6 +7,7 @@ import pyvista as pv
 
 from aerocaps.geom import Geometry
 from aerocaps.iges.iges_generator import IGESGenerator
+from aerocaps.stl.stl_generator import STLGenerator
 
 __all__ = [
     "GeometryContainer"
@@ -273,3 +274,25 @@ class GeometryContainer:
 
         iges_generator = IGESGenerator(geoms_to_export, units)
         iges_generator.generate(file_name)
+
+    def export_stl(self, file_name: str, Nu: int = 50, Nv: int = 50):
+        """
+        Exports all the exportable objects in the container to an IGES file
+
+        Parameters
+        ----------
+        file_name: str
+            Path to the IGES file
+        Nu: int
+            Number of points to evaluate in the :math:`u`-parametric direction
+        Nv: int
+            Number of points to evaluate in the :math:`v`-parametric direction
+        """
+        geoms_to_export = []
+        for geom in self._container.values():
+            if geom.construction:
+                continue
+            geoms_to_export.append(geom)
+
+        stl_generator = STLGenerator(geoms_to_export, Nu=Nu, Nv=Nv)
+        stl_generator.generate(file_name)
