@@ -174,6 +174,7 @@ class GeometryContainer:
              show: bool = True,
              Nu: int = 50,
              Nv: int = 50,
+             Nt: int = 50,
              surface_selection: bool = True,
              random_colors: bool = False,
              color_seed: int = 42
@@ -190,6 +191,8 @@ class GeometryContainer:
             The number of points in the :math:`u`-direction of each surface to evaluate. Default: ``50``
         Nv: int
             The number of points in the :math:`u`-direction of each surface to evaluate. Default: ``50``
+        Nt: int
+            The number of points in the concave hull for a trimmed surface evaluation. Default: ``50``
         surface_selection: bool
             Whether to allow interactive selection of surfaces. Default: ``True``
         random_colors: bool
@@ -253,7 +256,7 @@ class GeometryContainer:
                     grid = geom.plot_surface(plot, Nu, Nv, **color_kwargs)
                     grid.aerocaps_surf = geom
                 except TypeError:
-                    grid = geom.plot_surface(plot, Nt=Nu, **color_kwargs)
+                    grid = geom.plot_surface(plot, Nt=Nt, **color_kwargs)
             if hasattr(geom, "plot"):
                 geom.plot(plot, color="lime")
 
