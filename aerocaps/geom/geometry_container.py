@@ -192,7 +192,7 @@ class GeometryContainer:
         Nv: int
             The number of points in the :math:`u`-direction of each surface to evaluate. Default: ``50``
         Nt: int
-            The number of points in the concave hull for a trimmed surface evaluation. Default: ``50``
+            The number of points to evaluate along each curve for a trimmed surface evaluation. Default: ``50``
         surface_selection: bool
             Whether to allow interactive selection of surfaces. Default: ``True``
         random_colors: bool
