@@ -170,7 +170,14 @@ class GeometryContainer:
             return list(self._container.keys())
         return [k for k, v in self._container.items() if isinstance(v, geom_type)]
 
-    def plot(self, show: bool = True, Nu: int = 50, Nv: int = 50):
+    def plot(self,
+             show: bool = True,
+             Nu: int = 50,
+             Nv: int = 50,
+             surface_selection: bool = True,
+             random_colors: bool = False,
+             color_seed: int = 42
+             ):
         """
         Plots all the plottable objects in the container onto a :obj:`pyvista.Plotter` scene.
         Also adds a surface picker to dynamically show surface information on right-click.
@@ -183,6 +190,13 @@ class GeometryContainer:
             The number of points in the :math:`u`-direction of each surface to evaluate. Default: ``50``
         Nv: int
             The number of points in the :math:`u`-direction of each surface to evaluate. Default: ``50``
+        surface_selection: bool
+            Whether to allow interactive selection of surfaces. Default: ``True``
+        random_colors: bool
+            Whether to paint each surface with a random color. Default: ``False``
+        color_seed: int
+            The random number seed used to generate the random colors. Ignored if ``random_colors==False``.
+            Default: ``42``
         """
         def selection_callback(mesh):
 
@@ -222,24 +236,34 @@ class GeometryContainer:
 
         start_time = time.perf_counter()
         plot = pv.Plotter()
-        for geom in self._container.values():
+        num_geoms = len(self._container)
+
+        # Initialize color array if random_colors is specified
+        color_array = None
+        if random_colors:
+            rng = np.random.default_rng(seed=color_seed)
+            color_array = rng.uniform(low=0.0, high=1.0, size=(num_geoms, 3))
+
+        for geom_idx, geom in enumerate(self._container.values()):
             if geom.construction:  # Skip the construction geometries
                 continue
             if hasattr(geom, "plot_surface"):
+                color_kwargs = dict(color=color_array[geom_idx]) if random_colors else {}
                 try:
-                    grid = geom.plot_surface(plot, Nu, Nv)
+                    grid = geom.plot_surface(plot, Nu, Nv, **color_kwargs)
                     grid.aerocaps_surf = geom
                 except TypeError:
-                    grid = geom.plot_surface(plot, Nt=Nu)
+                    grid = geom.plot_surface(plot, Nt=Nu, **color_kwargs)
             if hasattr(geom, "plot"):
                 geom.plot(plot, color="lime")
 
-        plot.enable_mesh_picking(
-            callback=selection_callback,
-            style="surface",
-            color="indianred",
-            picker="hardware"
-        )
+        if surface_selection:
+            plot.enable_mesh_picking(
+                callback=selection_callback,
+                style="surface",
+                color="indianred",
+                picker="hardware"
+            )
         plot.add_axes()
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
