@@ -42,6 +42,19 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+dev = [
+    "scipy",
+    "numpy",
+    "matplotlib",
+    "pyvista",
+    "pyiges",
+    "shapely",
+    "rust-nurbs>=0.23",
+    "triangle",
+    "pytest"
+]
+
 [tool.setuptools]
 packages = [
     "aerocaps",
