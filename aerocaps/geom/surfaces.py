@@ -4861,7 +4861,7 @@ class BSplineSurface(Surface):
         """
         self.enforce_g0(other, surface_edge, other_surface_edge)
         n_ratio = other.get_perpendicular_degree(other_surface_edge) / self.get_perpendicular_degree(surface_edge)
-        for row_index in range(self.get_parallel_degree(surface_edge) + 1):
+        for row_index in range(self.get_parallel_control_point_length(surface_edge)):
             P_i0_b = self.get_point(row_index, 0, surface_edge)
             P_im_a = other.get_point(row_index, 0, other_surface_edge)
             P_im1_a = other.get_point(row_index, 1, other_surface_edge)
@@ -4926,7 +4926,7 @@ class BSplineSurface(Surface):
         p_perp_a = other.get_perpendicular_degree(other_surface_edge)
         p_perp_b = self.get_perpendicular_degree(surface_edge)
         n_ratio = (p_perp_a ** 2 - p_perp_a) / (p_perp_b ** 2 - p_perp_b)
-        for row_index in range(self.get_parallel_degree(surface_edge) + 1):
+        for row_index in range(self.get_parallel_control_point_length(surface_edge)):
             P_i0_b = self.get_point(row_index, 0, surface_edge)
             P_i1_b = self.get_point(row_index, 1, surface_edge)
             P_im_a = other.get_point(row_index, 0, other_surface_edge)
@@ -5301,6 +5301,111 @@ class BSplineSurface(Surface):
                 bspline_surf_d2sdv2_iso_u(P, self.knots_u, self.knots_v, 0.0, n_points))
         else:
             raise ValueError(f"No edge called {edge}")
+
+    def verify_g0(self, other: "BSplineSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge,
+                  n_points: int = 10):
+        """ Verifies that two NURBS Surfaces are G0 continuous along their shared edge"""
+        self_edge = self.get_edge(surface_edge, n_points=n_points)
+        other_edge = other.get_edge(other_surface_edge, n_points=n_points)
+        assert np.array_equal(self_edge, other_edge)
+
+    def verify_g1(self, other: "BSplineSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge,
+                  n_points: int = 10):
+        """
+        Verifies that two NURBSSurfaces are G1 continuous along their shared edge
+        """
+        # Get the first derivatives at the boundary and perpendicular to the boundary for each surface,
+        # evaluated at "n_points" locations along the boundary
+        self_perp_edge_derivs = self.get_first_derivs_along_edge(surface_edge, n_points=n_points, perp=True)
+        other_perp_edge_derivs = other.get_first_derivs_along_edge(other_surface_edge, n_points=n_points, perp=True)
+        print(f"{self_perp_edge_derivs = }")
+        print(f"{other_perp_edge_derivs = }")
+        self_perp_edge_derivs[np.absolute(self_perp_edge_derivs) < 1e-6] = 0.0
+        other_perp_edge_derivs[np.absolute(other_perp_edge_derivs) < 1e-6] = 0.0
+
+        # Initialize an array of ratios of magnitude of the derivative values at each point for both sides
+        # of the boundary
+        magnitude_ratios = []
+
+        # Loop over each pair of cross-derivatives evaluated along the boundary
+        for point_idx, (self_perp_edge_deriv, other_perp_edge_deriv) in enumerate(zip(
+                self_perp_edge_derivs, other_perp_edge_derivs)):
+
+            # Ensure that each derivative vector has the same direction along the boundary for each surface
+            try:
+                assert np.allclose(
+                    np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                    np.nan_to_num(other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+                )
+            except AssertionError:
+                assert np.allclose(
+                    np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                    np.nan_to_num(-other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+                )
+
+            # Compute the ratio of the magnitudes for each derivative vector along the boundary for each surface.
+            # These will be compared at the end.
+            #print(f"{self_perp_edge_deriv=},{other_perp_edge_deriv=}")
+            np.seterr(divide='ignore', invalid='ignore')
+            with np.errstate(divide="ignore"):
+                magnitude_ratios.append(np.nan_to_num(self_perp_edge_deriv / other_perp_edge_deriv, nan=0))
+
+        #print("Rational",f"{magnitude_ratios=}")
+        # Assert that the first derivatives along each boundary are proportional
+        current_f = None
+        for magnitude_ratio in magnitude_ratios:
+            for dxdydz_ratio in magnitude_ratio:
+                if np.any(np.isinf(dxdydz_ratio)) or np.any(np.isnan(dxdydz_ratio)) or np.any(dxdydz_ratio == 0.0):
+                    continue
+                if current_f is None:
+                    current_f = dxdydz_ratio
+                    continue
+                assert np.all(np.isclose(dxdydz_ratio, current_f))
+
+    def verify_g2(self, other: "BSplineSurface", surface_edge: SurfaceEdge, other_surface_edge: SurfaceEdge,
+                  n_points: int = 10):
+        """
+        Verifies that two B-spline surfaces are G2 continuous along their shared edge
+        """
+        # Get the first derivatives at the boundary and perpendicular to the boundary for each surface,
+        # evaluated at "n_points" locations along the boundary
+        self_perp_edge_derivs = self.get_second_derivs_along_edge(surface_edge, n_points=n_points, perp=True)
+        other_perp_edge_derivs = other.get_second_derivs_along_edge(other_surface_edge, n_points=n_points, perp=True)
+        print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
+        self_perp_edge_derivs[np.absolute(self_perp_edge_derivs) < 1e-6] = 0.0
+        other_perp_edge_derivs[np.absolute(other_perp_edge_derivs) < 1e-6] = 0.0
+
+        ratios_other_self = other_perp_edge_derivs / self_perp_edge_derivs
+        #print(f"{ratios_other_self=}")
+        #print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
+        # Initialize an array of ratios of magnitude of the derivative values at each point for both sides
+        # of the boundary
+        magnitude_ratios = []
+
+        # Loop over each pair of cross-derivatives evaluated along the boundary
+        for point_idx, (self_perp_edge_deriv, other_perp_edge_deriv) in enumerate(zip(
+                self_perp_edge_derivs, other_perp_edge_derivs)):
+            # Ensure that each derivative vector has the same direction along the boundary for each surface
+            assert np.allclose(
+                np.nan_to_num(self_perp_edge_deriv / np.linalg.norm(self_perp_edge_deriv)),
+                np.nan_to_num(other_perp_edge_deriv / np.linalg.norm(other_perp_edge_deriv))
+            )
+
+            # Compute the ratio of the magnitudes for each derivative vector along the boundary for each surface.
+            # These will be compared at the end.
+            with np.errstate(divide="ignore"):
+                magnitude_ratios.append(self_perp_edge_deriv / other_perp_edge_deriv)
+
+        # Assert that the second derivatives along each boundary are proportional
+        current_f = None
+        for magnitude_ratio in magnitude_ratios:
+            for dxdydz_ratio in magnitude_ratio:
+                if np.any(np.isinf(dxdydz_ratio)) or np.any(np.isnan(dxdydz_ratio)) or np.any(dxdydz_ratio == 0.0):
+                    continue
+                if current_f is None:
+                    current_f = dxdydz_ratio
+                    continue
+                assert np.all(np.isclose(dxdydz_ratio, current_f))
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
         """
@@ -6738,7 +6843,7 @@ class NURBSSurface(Surface):
         # evaluated at "n_points" locations along the boundary
         self_perp_edge_derivs = self.get_second_derivs_along_edge(surface_edge, n_points=n_points, perp=True)
         other_perp_edge_derivs = other.get_second_derivs_along_edge(other_surface_edge, n_points=n_points, perp=True)
-        #print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
+        print(f"{self_perp_edge_derivs=},{other_perp_edge_derivs=}")
         self_perp_edge_derivs[np.absolute(self_perp_edge_derivs) < 1e-6] = 0.0
         other_perp_edge_derivs[np.absolute(other_perp_edge_derivs) < 1e-6] = 0.0
 

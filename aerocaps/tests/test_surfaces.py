@@ -1,21 +1,14 @@
 import os
 
 import numpy as np
-import pyvista as pv
 import copy
 
-print(os.getcwd())
-
-
-#from aerocaps import DATA_DIR
 from aerocaps.geom.point import Point3D
-from aerocaps.geom.surfaces import NURBSSurface, BezierSurface, RationalBezierSurface, SurfaceEdge
+from aerocaps.geom.surfaces import NURBSSurface, BezierSurface, RationalBezierSurface, SurfaceEdge, BSplineSurface
 from aerocaps.geom.curves import BezierCurve3D,Line3D
 from aerocaps.geom import NegativeWeightError
 from aerocaps.units.angle import Angle
-from aerocaps.iges.iges_generator import IGESGenerator
-from aerocaps.geom.geometry_container import GeometryContainer
-from aerocaps import TEST_DIR
+from rust_nurbs import *
 
 
 def test_nurbs_revolve():
@@ -681,36 +674,144 @@ def test_Rational_Bezier_Surface_3():
                 Rat_bez_surf_1.verify_g2(Rat_bez_surf_2, side_self, side_other)
 
 
+def test_NURBS_1():
+    """
+    Tests the continuity enforcement method across many semi random pairs of 5x5 ``NURBS_Surfaces``s.
+    All the knots are uniform and equal for both the parallel and perpendicular degrees
+    """
+    # rng = np.random.default_rng(seed=42)
+    rng = np.random.default_rng(seed=35)
+    Assertion_error_counter = 0
+    Negative_error_counter = 0
+    num_tried = 0
+    flag = False
+    for n in range(1):
+
+        if flag:
+            break
+
+        # cp_1 = np.array([
+        #     [[0, 0, rng.random()], [1, 0, rng.random()], [2, 0, rng.random()], [3, 0, rng.random()], [4, 0, rng.random()]],
+        #     [[0, 1, rng.random()], [1, 1, rng.random()], [2, 1, rng.random()], [3, 1, rng.random()], [4, 1, rng.random()]],
+        #     [[0, 2, rng.random()], [1, 2, rng.random()], [2, 2, rng.random()], [3, 2, rng.random()], [4, 2, rng.random()]],
+        #     [[0, 3, rng.random()], [1, 3, rng.random()], [2, 3, rng.random()], [3, 3, rng.random()], [4, 3, rng.random()]],
+        #     [[0, 4, rng.random()], [1, 4, rng.random()], [2, 4, rng.random()], [3, 4, rng.random()], [4, 4, rng.random()]]
+        # ], dtype=np.float64)
+        #
+        # cp_2 = np.array([
+        #     [[0, 0, rng.random()], [1, 0, rng.random()], [2, 0, rng.random()], [3, 0, rng.random()], [4, 0, rng.random()]],
+        #     [[0, 1, rng.random()], [1, 1, rng.random()], [2, 1, rng.random()], [3, 1, rng.random()], [4, 1, rng.random()]],
+        #     [[0, 2, rng.random()], [1, 2, rng.random()], [2, 2, rng.random()], [3, 2, rng.random()], [4, 2, rng.random()]],
+        #     [[0, 3, rng.random()], [1, 3, rng.random()], [2, 3, rng.random()], [3, 3, rng.random()], [4, 3, rng.random()]],
+        #     [[0, 4, rng.random()], [1, 4, rng.random()], [2, 4, rng.random()], [3, 4, rng.random()], [4, 4, rng.random()]]
+        # ], dtype=np.float64)
+        # cp_2[:, :, 1] += 4.0
+
+        cp_1 = rng.uniform(low=-4.0, high=4.0, size=(6, 6, 3))
+        cp_2 = rng.uniform(low=-4.0, high=4.0, size=(6, 6, 3))
+
+        w_1 = rng.uniform(0.9, 1.1, (np.shape(cp_1)[0], np.shape(cp_1)[1]))
+        w_2 = rng.uniform(0.9, 1.1, (np.shape(cp_2)[0], np.shape(cp_2)[1]))
+
+        # w_1 = np.ones((6, 6))
+        # w_2 = np.ones((6, 6))
+
+        # w_1[:, 0] = 1.0
+        # w_1[:, -1] = 1.0
+        # w_1[0, :] = 1.0
+        # w_1[-1, :] = 1.0
+        # w_2[:, 0] = 1.0
+        # w_2[:, -1] = 1.0
+        # w_2[0, :] = 1.0
+        # w_2[-1, :] = 1.0
+
+        p = 5
+        m = p + 6 + 1
+        u_knot = np.zeros(m)
+        u_knot[:(p + 1)] = 0.0
+        u_knot[-(p + 1):] = 1.0
+        # u_knot[p + 1] = 0.25
+        # u_knot[p + 2] = 0.5
+        # u_knot[p + 3] = 0.75
+
+        v_knot = np.zeros(m)
+        v_knot[:(p + 1)] = 0.0
+        v_knot[-(p + 1):] = 1.0
+        # v_knot[p + 1] = 0.25
+        # v_knot[p + 2] = 0.5
+        # v_knot[p + 3] = 0.75
+
+        print(f"{u_knot = }")
+        print(f"{v_knot = }")
+
+        NURBS_1 = NURBSSurface(cp_1, u_knot, v_knot, w_1)
+        NURBS_2 = NURBSSurface(cp_2, u_knot, v_knot, w_2)
+
+        NURBS_1.enforce_g0g1g2(NURBS_2, 1.0, SurfaceEdge.v0, SurfaceEdge.u0)
+        NURBS_1.verify_g0(NURBS_2, SurfaceEdge.v0, SurfaceEdge.u0)
+        NURBS_1.verify_g1(NURBS_2, SurfaceEdge.v0, SurfaceEdge.u0)
+        NURBS_1.verify_g2(NURBS_2, SurfaceEdge.v0, SurfaceEdge.u0)
+
+        # COMPARE TO FDM
+        pts_edge = 10
+        step = 1e-6
+        term1_1st = np.array(nurbs_surf_eval_iso_v(NURBS_1.get_control_point_array(), NURBS_1.weights, u_knot, v_knot, pts_edge, 1.0))
+        term2_1st = np.array(nurbs_surf_eval_iso_v(NURBS_1.get_control_point_array(), NURBS_1.weights, u_knot, v_knot, pts_edge, 1.0 - step))
+        FDM_first_der_self_array = (term1_1st - term2_1st) / step
+        term1 = np.array(nurbs_surf_eval_iso_v(NURBS_1.get_control_point_array(), NURBS_1.weights, u_knot, v_knot, pts_edge, 1.0))
+        term2 = np.array(nurbs_surf_eval_iso_v(NURBS_1.get_control_point_array(), NURBS_1.weights, u_knot, v_knot, pts_edge, 1.0 - step))
+        term3 = np.array(nurbs_surf_eval_iso_v(NURBS_1.get_control_point_array(), NURBS_1.weights, u_knot, v_knot, pts_edge, 1.0 - 2 * step))
+        print(f"{term1 = }")
+        print(f"{term2 = }")
+        print(f"{term3 = }")
+        FDM_second_der_self_array = (term1 - 2 * term2 + term3) / (step ** 2)
+        print(f'{FDM_first_der_self_array=}')
+        print(f'{FDM_second_der_self_array=}')
+
+        print(f"{NURBS_1.get_first_derivs_along_edge(SurfaceEdge.v1, pts_edge, perp=True) = }")
+        print(f"{NURBS_1.get_second_derivs_along_edge(SurfaceEdge.v1, pts_edge, perp=True) = }")
+
+        NURBS_1.verify_g2(NURBS_2, SurfaceEdge.v0, SurfaceEdge.u0)
 
 
-#test_Rational_Bezier_Surface_3()
+def test_bspline_surf():
+    """
+    Tests the continuity enforcement method across many semi random pairs of 5x5 ``NURBS_Surfaces``s.
+    All the knots are uniform and equal for both the parallel and perpendicular degrees
+    """
+    # rng = np.random.default_rng(seed=42)
+    rng = np.random.default_rng(seed=35)
+    cp_1 = rng.uniform(low=-4.0, high=4.0, size=(6, 6, 3))
+    cp_2 = rng.uniform(low=-4.0, high=4.0, size=(6, 6, 3))
 
+    p = 2
+    m = p + 6 + 1
+    u_knot = np.zeros(m)
+    u_knot[:(p + 1)] = 0.0
+    u_knot[-(p + 1):] = 1.0
+    # u_knot[p + 1] = 0.3
+    # u_knot[p + 2] = 0.5
+    # u_knot[p + 3] = 0.7
+    u_knot[p + 1] = 0.5
+    u_knot[p + 2] = 0.5
+    u_knot[p + 3] = 0.5
 
-####### SCRATCH CODE #######
+    p = 2
+    m = p + 6 + 1
+    v_knot = np.zeros(m)
+    v_knot[:(p + 1)] = 0.0
+    v_knot[-(p + 1):] = 1.0
+    v_knot[p + 1] = 0.3
+    v_knot[p + 2] = 0.5
+    v_knot[p + 3] = 0.7
 
-# iges_entities = [Rat_bez_surf_1.to_iges(),Rat_bez_surf_2.to_iges()]
-# cp_net_points, cp_net_lines = Rat_bez_surf_1.generate_control_point_net()
-# iges_entities.extend([cp_net_point.to_iges() for cp_net_point in cp_net_points])
-# iges_entities.extend([cp_net_line.to_iges() for cp_net_line in cp_net_lines])
-# cp_net_points_2, cp_net_lines_2 = Rat_bez_surf_2.generate_control_point_net()
-# iges_entities.extend([cp_net_point.to_iges() for cp_net_point in cp_net_points_2])
-# iges_entities.extend([cp_net_line.to_iges() for cp_net_line in cp_net_lines_2])
+    print(f"{u_knot = }")
+    print(f"{v_knot = }")
 
-# iges_file = os.path.join(TEST_DIR, "Rat_Bez_test.igs")
-# print(f"{iges_file=}")
-# iges_generator = IGESGenerator(iges_entities, "meters")
-# iges_generator.generate(iges_file)
-# print("Generator passed")
+    bspline_surf_1 = BSplineSurface(cp_1, u_knot, v_knot)
+    bspline_surf_2 = BSplineSurface(cp_2, u_knot, v_knot)
 
-
-#PLOTTER
-
-# plot= pv.plotter()
-# Rat_bez_surf_1.plot_surface()
-# Rat_bez_surf_1.plot_control_point_mesh_lines(plot)
-# Rat_bez_surf_1.plot_control_points(plot)
-# Rat_bez_surf_2.plot_surface()
-# Rat_bez_surf_2.plot_control_point_mesh_lines(plot)
-# Rat_bez_surf_2.plot_control_points(plot)
-# plot.show()
-
+    bspline_surf_1.enforce_g0g1g2(bspline_surf_2, 1.0, SurfaceEdge.v0, SurfaceEdge.v1)
+    bspline_surf_1.verify_g0(bspline_surf_2, SurfaceEdge.v0, SurfaceEdge.v1)
+    bspline_surf_1.verify_g1(bspline_surf_2, SurfaceEdge.v0, SurfaceEdge.v1)
+    bspline_surf_1.verify_g2(bspline_surf_2, SurfaceEdge.v0, SurfaceEdge.v1)
