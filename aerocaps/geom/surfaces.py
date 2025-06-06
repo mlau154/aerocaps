@@ -15,7 +15,7 @@ from scipy.optimize import fsolve, minimize, OptimizeResult
 import aerocaps.iges.curves
 import aerocaps.iges.entity
 import aerocaps.iges.surfaces
-from aerocaps.geom.transformation import transform_points_into_coordinate_system
+from aerocaps.geom.transformation import transform_points_into_coordinate_system, Transformation3D
 from aerocaps.geom import Surface, InvalidGeometryError, NegativeWeightError, Geometry3D
 from aerocaps.geom.curves import BezierCurve3D, Line3D, RationalBezierCurve3D, NURBSCurve3D, BSplineCurve3D, \
     CurveOnParametricSurface, CompositeCurve3D
@@ -2055,6 +2055,27 @@ class BezierSurface(Surface):
         return (
             BezierSurface(bez_surf_split_1_P),
             BezierSurface(bez_surf_split_2_P)
+        )
+
+    def transform(self, **transformation_kwargs) -> "BezierSurface":
+        """
+        Creates a transformed copy of the surface by transforming each of the control points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        BezierSurface
+            Transformed surface
+        """
+        transformation = Transformation3D(**transformation_kwargs)
+        initial_control_points = self.get_control_point_array()
+        return BezierSurface(
+            np.array([transformation.transform(p_arr) for p_arr in initial_control_points]),
+            name=self.name, construction=self.construction
         )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
@@ -4242,6 +4263,28 @@ class RationalBezierSurface(Surface):
             RationalBezierSurface(P2, w2)
         )
 
+    def transform(self, **transformation_kwargs) -> "RationalBezierSurface":
+        """
+        Creates a transformed copy of the surface by transforming each of the control points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        RationalBezierSurface
+            Transformed surface
+        """
+        transformation = Transformation3D(**transformation_kwargs)
+        initial_control_points = self.get_control_point_array()
+        return RationalBezierSurface(
+            np.array([transformation.transform(p_arr) for p_arr in initial_control_points]),
+            weights=deepcopy(self.weights),
+            name=self.name, construction=self.construction
+        )
+
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
         """
         Generates a list of :obj:`~aerocaps.geom.point.Point3D` and :obj:`~aerocaps.geom.curves.Line3D` objects
@@ -5406,6 +5449,29 @@ class BSplineSurface(Surface):
                     current_f = dxdydz_ratio
                     continue
                 assert np.all(np.isclose(dxdydz_ratio, current_f))
+
+    def transform(self, **transformation_kwargs) -> "BSplineSurface":
+        """
+        Creates a transformed copy of the surface by transforming each of the control points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        BSplineSurface
+            Transformed surface
+        """
+        transformation = Transformation3D(**transformation_kwargs)
+        initial_control_points = self.get_control_point_array()
+        return BSplineSurface(
+            np.array([transformation.transform(p_arr) for p_arr in initial_control_points]),
+            knots_u=deepcopy(self.knots_u),
+            knots_v=deepcopy(self.knots_v),
+            name=self.name, construction=self.construction
+        )
 
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
         """
@@ -7056,6 +7122,30 @@ class NURBSSurface(Surface):
             NURBSSurface(P2, self.knots_u, self.knots_v, w2)
         )
 
+    def transform(self, **transformation_kwargs) -> "NURBSSurface":
+        """
+        Creates a transformed copy of the surface by transforming each of the control points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        BSplineSurface
+            Transformed surface
+        """
+        transformation = Transformation3D(**transformation_kwargs)
+        initial_control_points = self.get_control_point_array()
+        return NURBSSurface(
+            np.array([transformation.transform(p_arr) for p_arr in initial_control_points]),
+            weights=deepcopy(self.weights),
+            knots_u=deepcopy(self.knots_u),
+            knots_v=deepcopy(self.knots_v),
+            name=self.name, construction=self.construction
+        )
+
     def generate_control_point_net(self) -> (typing.List[Point3D], typing.List[Line3D]):
         """
         Generates a list of :obj:`~aerocaps.geom.point.Point3D` and :obj:`~aerocaps.geom.curves.Line3D` objects
@@ -7325,6 +7415,35 @@ class TrimmedSurface(Surface):
         planar_surf = BezierSurface([[pa, pd], [pb, pc]])
 
         return CompositeCurve3D(parametric_curves), planar_surf
+
+    def transform(self, **transformation_kwargs) -> "TrimmedSurface":
+        """
+        Creates a transformed copy of the surface by transforming both the outer boundary
+        in geometric space and the untrimmed surface. The parameteric trimming curves
+        are left unmodified.
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        TrimmedSurface
+            Transformed surface
+        """
+        return TrimmedSurface(
+            untrimmed_surface=self.untrimmed_surface.transform(**transformation_kwargs),
+            outer_boundary=self.outer_boundary.transform(**transformation_kwargs),
+            outer_boundary_para=self.outer_boundary_para,
+            outer_curve_on_parametric_surf_para=self.outer_curve_on_parametric_surf_para,
+            inner_boundaries=[curve.transform(**transformation_kwargs) for curve in self.inner_boundaries] 
+                if self.inner_boundaries is not None else None,
+            inner_boundaries_para=self.inner_boundaries_para 
+                if self.inner_boundaries_para is not None else None,
+            name=self.name,
+            construction=self.construction
+        )
 
     def evaluate(self, Nt: int) -> np.ndarray:
         if self.inner_boundaries is not None:

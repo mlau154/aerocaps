@@ -628,7 +628,22 @@ class PCurve3D(Geometry3D):
                              f"evaluate the curve at t=0 or t=1, please use the float format for these numbers "
                              f"(0.0 or 1.0)")
         return np.linspace(0.0, 1.0, t) if isinstance(t, int) else t
+    
+    @abstractmethod
+    def transform(self, **transformation_kwargs) -> "PCurve3D":
+        """
+        Creates a transformed copy of the curve by transforming the control points
 
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        PCurve3D
+            Transformed curve
+        """
 
 class Line2D(PCurve2D):
     """
@@ -951,6 +966,29 @@ class Line3D(PCurve3D):
             Vector object
         """
         return Vector3D(p0=self.p0, p1=self.p1)
+
+    def transform(self, **transformation_kwargs) -> "Line3D":
+        """
+        Creates a transformed copy of the curve by transforming the start and end points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        Line3D
+            Transformed line
+        """
+        transformation = Transformation3D(**transformation_kwargs)
+        new_points = transformation.transform(self.get_control_point_array())
+        return Line3D(
+            p0=Point3D.from_array(new_points[0]),
+            p1=Point3D.from_array(new_points[1]),
+            name=self.name, 
+            construction=self.construction
+        )
 
     def plot(self, plot: pv.Plotter = None, ax: plt.Axes = None, nt: int = 10, **kwargs):
         r"""
@@ -1289,7 +1327,11 @@ class BezierCurve2D(PCurve2D):
             Transformed curve
         """
         transformation = Transformation2D(**transformation_kwargs)
-        return BezierCurve2D(transformation.transform(self.get_control_point_array()))
+        return BezierCurve2D(
+            transformation.transform(self.get_control_point_array()),
+            name=self.name, 
+            construction=self.construction
+        )
 
     def elevate_degree(self) -> "BezierCurve2D":
         """
@@ -1586,7 +1628,11 @@ class BezierCurve3D(PCurve3D):
             Transformed curve
         """
         transformation = Transformation3D(**transformation_kwargs)
-        return BezierCurve3D(transformation.transform(self.get_control_point_array()))
+        return BezierCurve3D(
+            transformation.transform(self.get_control_point_array()),
+            name=self.name,
+            construction=self.construction
+        )
 
     def elevate_degree(self) -> "BezierCurve3D":
         """
@@ -1907,6 +1953,28 @@ class RationalBezierCurve2D(PCurve2D):
             return np.array([point.y.m - y_seek])
 
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
+
+    def transform(self, **transformation_kwargs) -> "RationalBezierCurve2D":
+        """
+        Creates a transformed copy of the curve by transforming each of the control points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation2D`
+
+        Returns
+        -------
+        RationalBezierCurve2D
+            Transformed curve
+        """
+        transformation = Transformation2D(**transformation_kwargs)
+        return RationalBezierCurve2D(
+            transformation.transform(self.get_control_point_array()),
+            weights=deepcopy(self.weights), 
+            name=self.name, 
+            construction=self.construction
+        )
 
     def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, nt: int = 201, **plt_kwargs):
         """
@@ -2233,6 +2301,28 @@ class RationalBezierCurve3D(PCurve3D):
 
         return fsolve(bez_root_find_func, x0=np.array([t0]))[0]
 
+    def transform(self, **transformation_kwargs) -> "RationalBezierCurve3D":
+        """
+        Creates a transformed copy of the curve by transforming each of the control points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        RationalBezierCurve3D
+            Transformed curve
+        """
+        transformation = Transformation3D(**transformation_kwargs)
+        return RationalBezierCurve3D(
+            transformation.transform(self.get_control_point_array()),
+            weights=deepcopy(self.weights), 
+            name=self.name, 
+            construction=self.construction
+        )
+
     def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, nt: int = 201, **plt_kwargs):
         """
         Plots the curve on a :obj:`matplotlib.pyplot.Axes` or a `pyvista.Plotter` window
@@ -2430,6 +2520,28 @@ class BSplineCurve3D(PCurve3D):
             xpp=xppyppzpp[:, 0], ypp=xppyppzpp[:, 1], zpp=xppyppzpp[:, 2]
         )
 
+    def transform(self, **transformation_kwargs) -> "BSplineCurve3D":
+        """
+        Creates a transformed copy of the curve by transforming each of the control points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        BSplineCurve3D
+            Transformed curve
+        """
+        transformation = Transformation3D(**transformation_kwargs)
+        return BSplineCurve3D(
+            transformation.transform(self.get_control_point_array()),
+            knot_vector=deepcopy(self.knot_vector), 
+            name=self.name, 
+            construction=self.construction
+        )
+
 
 class NURBSCurve3D(PCurve3D):
     """Three-dimensional Non-Uniform Rational B-Spline (NURBS) curve class"""
@@ -2568,6 +2680,29 @@ class NURBSCurve3D(PCurve3D):
             x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2],
             xp=xpypzp[:, 0], yp=xpypzp[:, 1], zp=xpypzp[:, 2],
             xpp=xppyppzpp[:, 0], ypp=xppyppzpp[:, 1], zpp=xppyppzpp[:, 2]
+        )
+
+    def transform(self, **transformation_kwargs) -> "NURBSCurve3D":
+        """
+        Creates a transformed copy of the curve by transforming each of the control points
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        NURBSCurve3D
+            Transformed curve
+        """
+        transformation = Transformation3D(**transformation_kwargs)
+        return NURBSCurve3D(
+            transformation.transform(self.get_control_point_array()),
+            weights=deepcopy(self.weights),
+            knot_vector=deepcopy(self.knot_vector),
+            name=self.name, 
+            construction=self.construction
         )
 
 
@@ -2762,6 +2897,26 @@ class CompositeCurve3D(Geometry3D):
                     break  # Go to the next curve in the stack
 
         return ordered_curves
+    
+    def transform(self, **transformation_kwargs) -> "CompositeCurve3D":
+        """
+        Creates a transformed copy of the curve by transforming each of the child curves
+
+        Parameters
+        ----------
+        transformation_kwargs
+            Keyword arguments passed to :obj:`~aerocaps.geom.transformation.Transformation3D`
+
+        Returns
+        -------
+        CompositeCurve3D
+            Transformed curve
+        """
+        return CompositeCurve3D(
+            [curve.transform(**transformation_kwargs) for curve in self.unordered_curves],
+            name=self.name,
+            construction=self.construction
+        )
 
     def evaluate(self, Nt: int) -> np.ndarray:
         return np.vstack(tuple([
