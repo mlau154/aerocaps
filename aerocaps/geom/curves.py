@@ -2646,8 +2646,8 @@ class CompositeCurve2D(Geometry2D):
     def _get_ordered_curve_list(self) -> (
             typing.List[BezierCurve2D or RationalBezierCurve2D or Line2D]):
         # Copy a list of the curves
-        curve_stack = deepcopy(self.unordered_curves)
-        ordered_curves = [deepcopy(curve_stack[0])]
+        curve_stack = deepcopy(self.unordered_curves[1:])
+        ordered_curves = [deepcopy(self.unordered_curves[0])]
 
         while curve_stack:  # Loop until the curve stack is empty
             for curve_idx, curve in enumerate(curve_stack):
@@ -2745,8 +2745,8 @@ class CompositeCurve3D(Geometry3D):
     def _get_ordered_curve_list(self) -> (
             typing.List[BezierCurve3D or RationalBezierCurve3D or BSplineCurve3D or NURBSCurve3D or Line3D]):
         # Copy a list of the curves
-        curve_stack = deepcopy(self.unordered_curves)
-        ordered_curves = [deepcopy(curve_stack[0])]
+        curve_stack = deepcopy(self.unordered_curves[1:])
+        ordered_curves = [deepcopy(self.unordered_curves[0])]
 
         while curve_stack:  # Loop until the curve stack is empty
             for curve_idx, curve in enumerate(curve_stack):
