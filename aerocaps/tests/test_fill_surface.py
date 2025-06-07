@@ -4,6 +4,7 @@ import aerocaps
 import aerocaps.iges.curves
 import aerocaps.iges.surfaces
 import aerocaps.iges.iges_generator
+from aerocaps.geom.geometry_container import GeometryContainer
 
 
 def test_fill_surface_xy_plane():
@@ -56,15 +57,14 @@ def test_fill_surface_xy_plane():
     )
 
     # Create the trimmed surface object
-    trimmed_surf = aerocaps.TrimmedSurface(surf, curve_on_parametric_surface)
+    trimmed_surf = aerocaps.TrimmedSurface(
+        untrimmed_surface=surf,
+        outer_boundary=composite,
+        outer_boundary_para=composite_para,
+        outer_curve_on_parametric_surf_para=curve_on_parametric_surface
+    )
 
     # Set up the IGES generator and generate the IGES file
-    entities = [line.to_iges() for line in [line_1, line_2, line_3]]
-    entities.extend([line.to_iges() for line in [line_1_para, line_2_para, line_3_para]])
-    entities.append(composite.to_iges(entities[0:3]))
-    entities.append(composite_para.to_iges(entities[3:6]))
-    entities.append(surf.to_iges())
-    entities.append(curve_on_parametric_surface.to_iges(entities[8], entities[7], entities[6]))
-    entities.append(trimmed_surf.to_iges(entities[8], entities[9]))
-    iges_generator = aerocaps.iges.iges_generator.IGESGenerator(entities, units="meters")
-    iges_generator.generate("fill_surface_xy_plane.igs")
+    container = GeometryContainer()
+    container.add_geometry(trimmed_surf)
+    container.export_iges("fill_surface_xy_plane.igs")
