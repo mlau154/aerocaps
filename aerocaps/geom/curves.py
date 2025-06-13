@@ -2456,7 +2456,7 @@ class BSplineCurve3D(PCurve3D):
         )
 
     def reverse(self) -> "BSplineCurve3D":
-        return self.__class__(np.flipud(self.control_points),
+        return self.__class__(np.flipud(self.get_control_point_array()),
                               (1.0 - self.knot_vector)[::-1],
                               self.degree)
 
