@@ -2542,6 +2542,38 @@ class BSplineCurve3D(PCurve3D):
             construction=self.construction
         )
 
+    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, nt: int = 201, **plt_kwargs):
+        """
+        Plots the curve on a :obj:`matplotlib.pyplot.Axes` or a `pyvista.Plotter` window
+
+        Parameters
+        ----------
+        ax: plt.Axes or pv.Plotter
+            Axes/window on which to plot
+        projection: str
+            Projection on which to plot (either 'XY', 'YZ', 'XZ', or 'XYZ' for a 3-D plot). Only used if
+            ``ax`` is a ``plt.Axes``. Defaults to 'XYZ' if not specified. Default: ``None``
+        nt: int
+            Number of evenly-spaced parameter values to plot. Default: ``201``
+        plt_kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot` or
+            :obj:`pyvista.Plotter.add_lines`
+        """
+        projection = "XYZ" if projection is None else projection
+        t_vec = np.linspace(0.0, 1.0, nt)
+        data = self.evaluate(t_vec)
+        args = tuple([data[:, _projection_dict[axis]] for axis in projection])
+
+        if isinstance(ax, plt.Axes):
+            ax.plot(*args, **plt_kwargs)
+        elif isinstance(ax, pv.Plotter):
+            arr = [data[0]]
+            for row in data[1:-1]:
+                arr.append(row)
+                arr.append(row)
+            arr.append(data[-1])
+            ax.add_lines(np.array(arr), **plt_kwargs)
+
 
 class NURBSCurve3D(PCurve3D):
     """Three-dimensional Non-Uniform Rational B-Spline (NURBS) curve class"""
@@ -2704,6 +2736,38 @@ class NURBSCurve3D(PCurve3D):
             name=self.name, 
             construction=self.construction
         )
+
+    def plot(self, ax: plt.Axes or pv.Plotter, projection: str = None, nt: int = 201, **plt_kwargs):
+        """
+        Plots the curve on a :obj:`matplotlib.pyplot.Axes` or a `pyvista.Plotter` window
+
+        Parameters
+        ----------
+        ax: plt.Axes or pv.Plotter
+            Axes/window on which to plot
+        projection: str
+            Projection on which to plot (either 'XY', 'YZ', 'XZ', or 'XYZ' for a 3-D plot). Only used if
+            ``ax`` is a ``plt.Axes``. Defaults to 'XYZ' if not specified. Default: ``None``
+        nt: int
+            Number of evenly-spaced parameter values to plot. Default: ``201``
+        plt_kwargs
+            Additional keyword arguments to pass to :obj:`matplotlib.pyplot.Axes.plot` or
+            :obj:`pyvista.Plotter.add_lines`
+        """
+        projection = "XYZ" if projection is None else projection
+        t_vec = np.linspace(0.0, 1.0, nt)
+        data = self.evaluate(t_vec)
+        args = tuple([data[:, _projection_dict[axis]] for axis in projection])
+
+        if isinstance(ax, plt.Axes):
+            ax.plot(*args, **plt_kwargs)
+        elif isinstance(ax, pv.Plotter):
+            arr = [data[0]]
+            for row in data[1:-1]:
+                arr.append(row)
+                arr.append(row)
+            arr.append(data[-1])
+            ax.add_lines(np.array(arr), **plt_kwargs)
 
 
 class CompositeCurve2D(Geometry2D):
