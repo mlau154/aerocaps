@@ -111,14 +111,14 @@ def test_one_edge():
     # iges_generator = IGESGenerator([surf_1.to_iges(), surf_2.to_iges(), surf_3.to_iges()], units="meters")
     # iges_generator.generate("surface_optimizer.igs")
 
-    import pyvista as pv
-    plot = pv.Plotter()
-    surf_1.plot_surface(plot, color="blue")
-    surf_2.plot_surface(plot, color="red")
-    surf_2.plot_control_points(plot, color="black", point_size=20, render_points_as_spheres=True)
-    surf_2.plot_control_point_mesh_lines(plot, color="orange")
-    surf_3.plot_surface(plot, color="green")
-    plot.show()
+    # import pyvista as pv
+    # plot = pv.Plotter()
+    # surf_1.plot_surface(plot, color="blue")
+    # surf_2.plot_surface(plot, color="red")
+    # surf_2.plot_control_points(plot, color="black", point_size=20, render_points_as_spheres=True)
+    # surf_2.plot_control_point_mesh_lines(plot, color="orange")
+    # surf_3.plot_surface(plot, color="green")
+    # plot.show()
 
 
 if __name__ == "__main__":
