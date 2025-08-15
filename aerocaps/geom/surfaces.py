@@ -1192,13 +1192,21 @@ class BezierSurface(Surface):
             Edge of the surface along which to retrieve the control point
         """
         if surface_edge == SurfaceEdge.v1:
-            self.points[row_index][-(continuity_index + 1)] = point
+            self.points[row_index][-(continuity_index + 1)].x.m = point.x.m
+            self.points[row_index][-(continuity_index + 1)].y.m = point.y.m
+            self.points[row_index][-(continuity_index + 1)].z.m = point.z.m
         elif surface_edge == SurfaceEdge.v0:
-            self.points[row_index][continuity_index] = point
+            self.points[row_index][continuity_index].x.m = point.x.m
+            self.points[row_index][continuity_index].y.m = point.y.m
+            self.points[row_index][continuity_index].z.m = point.z.m
         elif surface_edge == SurfaceEdge.u1:
-            self.points[-(continuity_index + 1)][row_index] = point
+            self.points[-(continuity_index + 1)][row_index].x.m = point.x.m
+            self.points[-(continuity_index + 1)][row_index].y.m = point.y.m
+            self.points[-(continuity_index + 1)][row_index].z.m = point.z.m
         elif surface_edge == SurfaceEdge.u0:
-            self.points[continuity_index][row_index] = point
+            self.points[continuity_index][row_index].x.m = point.x.m
+            self.points[continuity_index][row_index].y.m = point.y.m
+            self.points[continuity_index][row_index].z.m = point.z.m
         else:
             raise ValueError("Invalid surface_edge value")
 
@@ -2952,13 +2960,21 @@ class RationalBezierSurface(Surface):
             Edge of the surface along which to retrieve the control point
         """
         if surface_edge == SurfaceEdge.v1:
-            self.points[row_index][-(continuity_index + 1)] = point
+            self.points[row_index][-(continuity_index + 1)].x.m = point.x.m
+            self.points[row_index][-(continuity_index + 1)].y.m = point.y.m
+            self.points[row_index][-(continuity_index + 1)].z.m = point.z.m
         elif surface_edge == SurfaceEdge.v0:
-            self.points[row_index][continuity_index] = point
+            self.points[row_index][continuity_index].x.m = point.x.m
+            self.points[row_index][continuity_index].y.m = point.y.m
+            self.points[row_index][continuity_index].z.m = point.z.m
         elif surface_edge == SurfaceEdge.u1:
-            self.points[-(continuity_index + 1)][row_index] = point
+            self.points[-(continuity_index + 1)][row_index].x.m = point.x.m
+            self.points[-(continuity_index + 1)][row_index].y.m = point.y.m
+            self.points[-(continuity_index + 1)][row_index].z.m = point.z.m
         elif surface_edge == SurfaceEdge.u0:
-            self.points[continuity_index][row_index] = point
+            self.points[continuity_index][row_index].x.m = point.x.m
+            self.points[continuity_index][row_index].y.m = point.y.m
+            self.points[continuity_index][row_index].z.m = point.z.m
         else:
             raise ValueError("Invalid surface_edge value")
 
@@ -4760,13 +4776,21 @@ class BSplineSurface(Surface):
             Edge of the surface along which to retrieve the control point
         """
         if surface_edge == SurfaceEdge.v1:
-            self.points[row_index][-(continuity_index + 1)] = point
+            self.points[row_index][-(continuity_index + 1)].x.m = point.x.m
+            self.points[row_index][-(continuity_index + 1)].y.m = point.y.m
+            self.points[row_index][-(continuity_index + 1)].z.m = point.z.m
         elif surface_edge == SurfaceEdge.v0:
-            self.points[row_index][continuity_index] = point
+            self.points[row_index][continuity_index].x.m = point.x.m
+            self.points[row_index][continuity_index].y.m = point.y.m
+            self.points[row_index][continuity_index].z.m = point.z.m
         elif surface_edge == SurfaceEdge.u1:
-            self.points[-(continuity_index + 1)][row_index] = point
+            self.points[-(continuity_index + 1)][row_index].x.m = point.x.m
+            self.points[-(continuity_index + 1)][row_index].y.m = point.y.m
+            self.points[-(continuity_index + 1)][row_index].z.m = point.z.m
         elif surface_edge == SurfaceEdge.u0:
-            self.points[continuity_index][row_index] = point
+            self.points[continuity_index][row_index].x.m = point.x.m
+            self.points[continuity_index][row_index].y.m = point.y.m
+            self.points[continuity_index][row_index].z.m = point.z.m
         else:
             raise ValueError("Invalid surface_edge value")
 
@@ -6068,13 +6092,21 @@ class NURBSSurface(Surface):
             Edge of the surface along which to retrieve the control point
         """
         if surface_edge == SurfaceEdge.v1:
-            self.points[row_index][-(continuity_index + 1)] = point
+            self.points[row_index][-(continuity_index + 1)].x.m = point.x.m
+            self.points[row_index][-(continuity_index + 1)].y.m = point.y.m
+            self.points[row_index][-(continuity_index + 1)].z.m = point.z.m
         elif surface_edge == SurfaceEdge.v0:
-            self.points[row_index][continuity_index] = point
+            self.points[row_index][continuity_index].x.m = point.x.m
+            self.points[row_index][continuity_index].y.m = point.y.m
+            self.points[row_index][continuity_index].z.m = point.z.m
         elif surface_edge == SurfaceEdge.u1:
-            self.points[-(continuity_index + 1)][row_index] = point
+            self.points[-(continuity_index + 1)][row_index].x.m = point.x.m
+            self.points[-(continuity_index + 1)][row_index].y.m = point.y.m
+            self.points[-(continuity_index + 1)][row_index].z.m = point.z.m
         elif surface_edge == SurfaceEdge.u0:
-            self.points[continuity_index][row_index] = point
+            self.points[continuity_index][row_index].x.m = point.x.m
+            self.points[continuity_index][row_index].y.m = point.y.m
+            self.points[continuity_index][row_index].z.m = point.z.m
         else:
             raise ValueError("Invalid surface_edge value")
 
